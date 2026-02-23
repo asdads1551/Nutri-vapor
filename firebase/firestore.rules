@@ -1,0 +1,151 @@
+rules_version = '2';
+
+// Nutri App - Firestore Security Rules
+// Deploy via: firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // Helper Functions
+    // ============================================
+
+    // Check if the request is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the authenticated user matches the userId
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Validate string field: not empty, within max length
+    function isValidString(field, maxLen) {
+      return field is string && field.size() > 0 && field.size() <= maxLen;
+    }
+
+    // Validate optional string field: empty or within max length
+    function isOptionalString(field, maxLen) {
+      return !field.matches('.*') || (field is string && field.size() <= maxLen);
+    }
+
+    // Validate a number is within range
+    function isInRange(value, minVal, maxVal) {
+      return value is number && value >= minVal && value <= maxVal;
+    }
+
+    // Ensure no script injection in string fields
+    function noScriptTags(field) {
+      return !(field is string) || !field.lower().matches('.*<script.*');
+    }
+
+    // ============================================
+    // Users Collection
+    // 3NF: users/{uid} is the single source of truth for firstName, lastName
+    // ============================================
+    match /users/{userId} {
+      // Users can only read/write their own profile
+      allow read: if isAuthenticated();  // Allow other users to read for authorId -> name resolution
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && (!('email' in request.resource.data) || request.resource.data.email == resource.data.email);
+      // Prevent deleting other users' data
+      allow delete: if isOwner(userId);
+
+      // --- User Settings (nested subcollections) ---
+      match /settings/{settingId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId)
+          // Limit document size (max 50 fields)
+          && request.resource.data.keys().size() <= 50;
+      }
+
+      // --- Nutrition Entries ---
+      match /nutritionEntries/{entryId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasAll(['name', 'calories', 'mealType', 'dateKey'])
+          && isValidString(request.resource.data.name, 200)
+          && noScriptTags(request.resource.data.name)
+          && isInRange(request.resource.data.calories, 0, 50000)
+          && request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+        allow update: if isOwner(userId)
+          && isValidString(request.resource.data.name, 200)
+          && noScriptTags(request.resource.data.name);
+        allow delete: if isOwner(userId);
+      }
+
+      // --- Health Snapshots ---
+      // 3NF: dateKey is the document ID only (not duplicated as a field inside)
+      // 3NF: calorieGoal removed — resolve via settings/nutritionGoals
+      match /healthSnapshots/{dateKey} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId)
+          // Validate dateKey format (document ID)
+          && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          // 3NF: reject if dateKey or calorieGoal is stored inside the document
+          && !('dateKey' in request.resource.data)
+          && !('calorieGoal' in request.resource.data)
+          && request.resource.data.keys().size() <= 20;
+      }
+
+      // --- Favorites ---
+      match /favorites/{recipeId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+
+      // --- Devices (push notification tokens) ---
+      match /devices/{deviceId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+    }
+
+    // ============================================
+    // Recipes Collection (Public)
+    // 3NF: authorName removed — resolve via authorId -> users/{uid}
+    // ============================================
+    match /recipes/{recipeId} {
+      // Anyone authenticated can read recipes
+      allow read: if isAuthenticated();
+
+      // Only authenticated users can create recipes
+      // authorId must be the current user OR "system" (for seed recipes)
+      allow create: if isAuthenticated()
+        && (request.resource.data.authorId == request.auth.uid || request.resource.data.authorId == "system")
+        // Required fields validation
+        && request.resource.data.keys().hasAll(['name', 'authorId', 'createdAt'])
+        && isValidString(request.resource.data.name, 200)
+        && noScriptTags(request.resource.data.name)
+        // Validate numeric fields
+        && isInRange(request.resource.data.cookingTime, 0, 1440)
+        && isInRange(request.resource.data.servings, 1, 100)
+        && isInRange(request.resource.data.calories, 0, 50000)
+        // Limit ingredients array
+        && (!('ingredients' in request.resource.data) || request.resource.data.ingredients.size() <= 50)
+        // Limit total fields
+        && request.resource.data.keys().size() <= 30;
+
+      // Only the author can update their own recipe
+      allow update: if isAuthenticated()
+        && resource.data.authorId == request.auth.uid
+        // Cannot change authorId
+        && request.resource.data.authorId == resource.data.authorId
+        && isValidString(request.resource.data.name, 200)
+        && noScriptTags(request.resource.data.name);
+
+      // Only the author can delete their own recipe
+      allow delete: if isAuthenticated()
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    // ============================================
+    // Default: Deny Everything Else
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

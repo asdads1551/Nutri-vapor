@@ -1,0 +1,10 @@
+.build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+.DS_Store
+.env
+firebase-service-account.json
+*.p8
+Packages/
+Package.resolved

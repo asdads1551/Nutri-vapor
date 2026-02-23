@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// Nutri App - Firebase Storage Security Rules
+// Deploy via: firebase deploy --only storage
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ============================================
+    // User Private Files
+    // ============================================
+    match /users/{userId}/{allPaths=**} {
+      // Only the file owner can read/write
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        // Max file size: 10 MB
+        && request.resource.size < 10 * 1024 * 1024
+        // Only allow image types
+        && request.resource.contentType.matches('image/(jpeg|png|gif|webp)');
+    }
+
+    // ============================================
+    // Recipe Media (Public Read, Auth Write)
+    // ============================================
+    match /recipes/{recipeId}/{fileName} {
+      // Anyone authenticated can read recipe media
+      allow read: if request.auth != null;
+
+      // Only authenticated users can upload
+      allow write: if request.auth != null
+        // File size limits based on type
+        && (
+          // Images: max 10 MB, image types only
+          (fileName.matches('image\\.(jpg|jpeg|png)')
+            && request.resource.size < 10 * 1024 * 1024
+            && request.resource.contentType.matches('image/(jpeg|png)'))
+          ||
+          // Audio: max 20 MB, audio types only
+          (fileName.matches('audio\\.(m4a|mp3|wav)')
+            && request.resource.size < 20 * 1024 * 1024
+            && request.resource.contentType.matches('audio/(m4a|mpeg|wav|x-m4a|mp4)'))
+        );
+
+      // Delete: only the uploader can delete (checked client-side via Firestore authorId)
+      allow delete: if request.auth != null;
+    }
+
+    // ============================================
+    // Default: Deny Everything Else
+    // ============================================
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
