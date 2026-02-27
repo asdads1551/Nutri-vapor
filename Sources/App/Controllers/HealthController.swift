@@ -14,9 +14,9 @@ struct HealthController: RouteCollection {
     @Sendable
     func syncHealth(req: Request) async throws -> SuccessResponse {
         let userID = try req.authenticatedUserID
+        try HealthSyncRequest.validate(content: req)
         let body = try req.content.decode(HealthSyncRequest.self)
 
-        // Upsert health sync log
         let existing = try await HealthSyncLog.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$date == body.date)
@@ -48,16 +48,11 @@ struct HealthController: RouteCollection {
     @Sendable
     func healthSummary(req: Request) async throws -> HealthSummaryResponse {
         let userID = try req.authenticatedUserID
-        let dateStr = req.query[String.self, at: "date"] ?? {
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd"
-            return f.string(from: Date())
-        }()
+        let dateStr = req.query[String.self, at: "date"]
+            ?? DateFormatter.yyyyMMdd.string(from: Date())
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: dateStr) else {
-            throw Abort(.badRequest, reason: "Invalid date format")
+        guard let date = DateFormatter.yyyyMMdd.date(from: dateStr) else {
+            throw Abort(.badRequest, reason: "Invalid date format. Use yyyy-MM-dd")
         }
 
         let log = try await HealthSyncLog.query(on: req.db)
@@ -82,9 +77,9 @@ struct HealthController: RouteCollection {
         let userID = try req.authenticatedUserID
         let metric = req.query[String.self, at: "metric"] ?? "steps"
         let range = req.query[String.self, at: "range"] ?? "30d"
-        let days = Int(range.replacingOccurrences(of: "d", with: "")) ?? 30
+        let days = min(Int(range.replacingOccurrences(of: "d", with: "")) ?? 30, 365)
 
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let startDate = calendar.date(byAdding: .day, value: -days, to: today)!
 
@@ -93,9 +88,6 @@ struct HealthController: RouteCollection {
             .filter(\.$date >= startDate)
             .sort(\.$date, .ascending)
             .all()
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
 
         let data: [TrendDataPoint] = logs.compactMap { log in
             let value: Double?
@@ -108,7 +100,7 @@ struct HealthController: RouteCollection {
             default: value = log.steps.map(Double.init)
             }
             guard let v = value else { return nil }
-            return TrendDataPoint(date: formatter.string(from: log.date), value: v)
+            return TrendDataPoint(date: DateFormatter.yyyyMMdd.string(from: log.date), value: v)
         }
 
         let average = data.isEmpty ? 0 : data.reduce(0) { $0 + $1.value } / Double(data.count)
@@ -125,14 +117,10 @@ struct HealthController: RouteCollection {
     @Sendable
     func weeklyReport(req: Request) async throws -> WeeklyReportResponse {
         let userID = try req.authenticatedUserID
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let weekAgo = calendar.date(byAdding: .day, value: -7, to: today)!
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-
-        // Get nutrition data
         let entries = try await FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$eatenAt >= weekAgo)
@@ -143,22 +131,21 @@ struct HealthController: RouteCollection {
         let avgCalories = entries.isEmpty ? 0 : totalCalories / 7.0
         let avgProtein = entries.isEmpty ? 0 : totalProtein / 7.0
 
-        // Get health data
         let logs = try await HealthSyncLog.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$date >= weekAgo)
             .all()
 
-        let avgSteps = logs.compactMap(\.steps).isEmpty ? nil :
-            logs.compactMap(\.steps).reduce(0, +) / max(1, logs.compactMap(\.steps).count)
+        let stepValues = logs.compactMap(\.steps)
+        let avgSteps = stepValues.isEmpty ? nil : stepValues.reduce(0, +) / stepValues.count
 
         var highlights: [String] = []
         if avgProtein > 50 { highlights.append("蛋白質攝取充足 ✓") }
         if avgCalories > 0 { highlights.append("本週平均熱量: \(Int(avgCalories)) kcal") }
 
         return WeeklyReportResponse(
-            weekStart: formatter.string(from: weekAgo),
-            weekEnd: formatter.string(from: today),
+            weekStart: DateFormatter.yyyyMMdd.string(from: weekAgo),
+            weekEnd: DateFormatter.yyyyMMdd.string(from: today),
             avgCalories: avgCalories,
             avgProtein: avgProtein,
             avgSteps: avgSteps,

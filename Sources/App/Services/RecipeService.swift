@@ -7,7 +7,7 @@ struct RecipeService {
 
     /// Get recipe recommendations based on user's nutrition gaps
     func getRecommendations(userID: UUID, limit: Int = 5) async throws -> [(Recipe, String)] {
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
 

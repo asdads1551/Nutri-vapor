@@ -1,7 +1,7 @@
 import Vapor
 
 // MARK: - Create Food Entry Request
-struct CreateFoodEntryRequest: Content {
+struct CreateFoodEntryRequest: Content, Validatable {
     let mealType: String
     let foodName: String
     let portionSize: Double?
@@ -41,10 +41,21 @@ struct CreateFoodEntryRequest: Content {
         case vitaminDMcg = "vitamin_d_mcg"
         case eatenAt = "eaten_at"
     }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("food_name", as: String.self, is: .count(1...200))
+        validations.add("calories", as: Double.self, is: .range(0...50000))
+        validations.add("protein_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("carbs_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("fat_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("fiber_g", as: Double?.self, required: false, is: .nil || .range(0...500))
+        validations.add("sugar_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("sodium_mg", as: Double?.self, required: false, is: .nil || .range(0...100000))
+    }
 }
 
 // MARK: - Update Food Entry Request
-struct UpdateFoodEntryRequest: Content {
+struct UpdateFoodEntryRequest: Content, Validatable {
     let mealType: String?
     let foodName: String?
     let calories: Double?
@@ -65,6 +76,14 @@ struct UpdateFoodEntryRequest: Content {
         case fiberG = "fiber_g"
         case sugarG = "sugar_g"
         case sodiumMg = "sodium_mg"
+    }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("food_name", as: String?.self, required: false, is: .nil || .count(1...200))
+        validations.add("calories", as: Double?.self, required: false, is: .nil || .range(0...50000))
+        validations.add("protein_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("carbs_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("fat_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
     }
 }
 
@@ -155,13 +174,17 @@ struct TrendResponse: Content {
 }
 
 // MARK: - Sync Request
-struct NutritionSyncRequest: Content {
+struct NutritionSyncRequest: Content, Validatable {
     let entries: [CreateFoodEntryRequest]
     let lastSyncAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case entries
         case lastSyncAt = "last_sync_at"
+    }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("entries", as: [CreateFoodEntryRequest].self, is: .count(...APIConstants.maxSyncBatchSize))
     }
 }
 

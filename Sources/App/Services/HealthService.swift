@@ -7,7 +7,7 @@ struct HealthService {
 
     /// Analyze weekly health trends for a user
     func weeklyAnalysis(userID: UUID) async throws -> (avgSteps: Int?, avgSleep: Double?, weightTrend: String) {
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let weekAgo = calendar.date(byAdding: .day, value: -7, to: today)!
 

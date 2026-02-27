@@ -19,7 +19,7 @@ struct UserDetailResponse: Content {
 }
 
 // MARK: - Update User Request
-struct UpdateUserRequest: Content {
+struct UpdateUserRequest: Content, Validatable {
     let firstName: String?
     let lastName: String?
     let email: String?
@@ -28,6 +28,12 @@ struct UpdateUserRequest: Content {
         case firstName = "first_name"
         case lastName = "last_name"
         case email
+    }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("first_name", as: String?.self, required: false, is: .nil || .count(1...100))
+        validations.add("last_name", as: String?.self, required: false, is: .nil || .count(1...100))
+        validations.add("email", as: String?.self, required: false, is: .nil || .email)
     }
 }
 
@@ -59,7 +65,7 @@ struct ProfileResponse: Content {
 }
 
 // MARK: - Update Profile Request
-struct UpdateProfileRequest: Content {
+struct UpdateProfileRequest: Content, Validatable {
     let displayName: String?
     let gender: String?
     let birthDate: Date?
@@ -80,6 +86,14 @@ struct UpdateProfileRequest: Content {
         case dietType = "diet_type"
         case calorieGoal = "calorie_goal"
         case allergies
+    }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("display_name", as: String?.self, required: false, is: .nil || .count(1...100))
+        validations.add("height_cm", as: Double?.self, required: false, is: .nil || .range(50...300))
+        validations.add("weight_kg", as: Double?.self, required: false, is: .nil || .range(10...500))
+        validations.add("calorie_goal", as: Int?.self, required: false, is: .nil || .range(500...10000))
+        validations.add("allergies", as: [String]?.self, required: false, is: .nil || .count(...20))
     }
 }
 
@@ -107,7 +121,7 @@ struct GoalsResponse: Content {
 }
 
 // MARK: - Update Goals Request
-struct UpdateGoalsRequest: Content {
+struct UpdateGoalsRequest: Content, Validatable {
     let calories: Int?
     let proteinG: Double?
     let carbsG: Double?
@@ -126,5 +140,14 @@ struct UpdateGoalsRequest: Content {
         case sugarG = "sugar_g"
         case sodiumMg = "sodium_mg"
         case waterMl = "water_ml"
+    }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("calories", as: Int?.self, required: false, is: .nil || .range(500...10000))
+        validations.add("protein_g", as: Double?.self, required: false, is: .nil || .range(0...500))
+        validations.add("carbs_g", as: Double?.self, required: false, is: .nil || .range(0...1000))
+        validations.add("fat_g", as: Double?.self, required: false, is: .nil || .range(0...500))
+        validations.add("fiber_g", as: Double?.self, required: false, is: .nil || .range(0...200))
+        validations.add("water_ml", as: Int?.self, required: false, is: .nil || .range(0...10000))
     }
 }

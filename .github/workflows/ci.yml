@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nutri
+          POSTGRES_PASSWORD: nutri_test
+          POSTGRES_DB: nutri_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nutri -d nutri_test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    container:
+      image: swift:6.0-noble
+
+    env:
+      DB_HOSTNAME: postgres
+      DB_PORT: 5432
+      DB_USERNAME: nutri
+      DB_PASSWORD: nutri_test
+      DB_NAME: nutri_test_db
+      JWT_SECRET: test-jwt-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-swift-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-swift-
+
+      - name: Build
+        run: swift build
+
+      - name: Run tests
+        run: swift test
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t nutri-vapor:${{ github.sha }} .

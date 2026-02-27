@@ -20,6 +20,7 @@ struct NutritionController: RouteCollection {
     @Sendable
     func createEntry(req: Request) async throws -> FoodEntryResponse {
         let userID = try req.authenticatedUserID
+        try CreateFoodEntryRequest.validate(content: req)
         let body = try req.content.decode(CreateFoodEntryRequest.self)
 
         guard let mealType = MealTypeDB(rawValue: body.mealType) ?? MealTypeDB(chinese: body.mealType) else {
@@ -69,12 +70,10 @@ struct NutritionController: RouteCollection {
         var query = FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
 
-        // Filter by date
+        // Filter by date (#17/#18: use shared formatter with explicit timezone)
         if let dateStr = req.query[String.self, at: "date"] {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            if let date = formatter.date(from: dateStr) {
-                let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: date)!
+            if let date = DateFormatter.yyyyMMdd.date(from: dateStr) {
+                let nextDay = Calendar.taipei.date(byAdding: .day, value: 1, to: date)!
                 query = query
                     .filter(\.$eatenAt >= date)
                     .filter(\.$eatenAt < nextDay)
@@ -143,6 +142,7 @@ struct NutritionController: RouteCollection {
         guard let entryID = req.parameters.get("entryID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Invalid entry ID")
         }
+        try UpdateFoodEntryRequest.validate(content: req)
         let body = try req.content.decode(UpdateFoodEntryRequest.self)
 
         guard let entry = try await FoodEntry.query(on: req.db)
@@ -202,19 +202,14 @@ struct NutritionController: RouteCollection {
     @Sendable
     func dailySummary(req: Request) async throws -> DailySummaryResponse {
         let userID = try req.authenticatedUserID
-        let dateStr = req.query[String.self, at: "date"] ?? {
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd"
-            return f.string(from: Date())
-        }()
+        let dateStr = req.query[String.self, at: "date"]
+            ?? DateFormatter.yyyyMMdd.string(from: Date())
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: dateStr) else {
+        guard let date = DateFormatter.yyyyMMdd.date(from: dateStr) else {
             throw Abort(.badRequest, reason: "Invalid date format. Use yyyy-MM-dd")
         }
 
-        let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: date)!
+        let nextDay = Calendar.taipei.date(byAdding: .day, value: 1, to: date)!
         let entries = try await FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$eatenAt >= date)
@@ -227,13 +222,12 @@ struct NutritionController: RouteCollection {
         let totalFat = entries.reduce(0.0) { $0 + $1.fatG }
         let totalFiber = entries.reduce(0.0) { $0 + $1.fiberG }
 
-        // Get user's calorie goal
         let goals = try await NutritionGoal.query(on: req.db)
             .filter(\.$user.$id == userID)
             .first()
         let calorieGoal = Double(goals?.calories ?? 2000)
         let goalMet = totalCalories >= calorieGoal * 0.8 && totalCalories <= calorieGoal * 1.2
-        let score = min(100, Int((totalCalories / calorieGoal) * 100))
+        let score = calorieGoal > 0 ? min(100, Int((totalCalories / calorieGoal) * 100)) : 0
 
         return DailySummaryResponse(
             date: dateStr,
@@ -252,7 +246,7 @@ struct NutritionController: RouteCollection {
     @Sendable
     func weeklySummary(req: Request) async throws -> [DailySummaryResponse] {
         let userID = try req.authenticatedUserID
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let weekAgo = calendar.date(byAdding: .day, value: -7, to: today)!
 
@@ -262,19 +256,15 @@ struct NutritionController: RouteCollection {
             .filter(\.$eatenAt < calendar.date(byAdding: .day, value: 1, to: today)!)
             .all()
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-
-        // Group by day
         var dailyMap: [String: [FoodEntry]] = [:]
         for entry in entries {
-            let key = formatter.string(from: entry.eatenAt)
+            let key = DateFormatter.yyyyMMdd.string(from: entry.eatenAt)
             dailyMap[key, default: []].append(entry)
         }
 
         return (0..<7).map { offset in
             let date = calendar.date(byAdding: .day, value: -offset, to: today)!
-            let key = formatter.string(from: date)
+            let key = DateFormatter.yyyyMMdd.string(from: date)
             let dayEntries = dailyMap[key] ?? []
 
             return DailySummaryResponse(
@@ -291,25 +281,46 @@ struct NutritionController: RouteCollection {
         }.reversed()
     }
 
-    // MARK: - GET /nutrition/summary/monthly
+    // MARK: - GET /nutrition/summary/monthly (#21: use DailyNutritionSummary pre-aggregated data)
     @Sendable
     func monthlySummary(req: Request) async throws -> [DailySummaryResponse] {
         let userID = try req.authenticatedUserID
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let monthAgo = calendar.date(byAdding: .day, value: -30, to: today)!
 
+        // Use pre-aggregated DailyNutritionSummary when available
+        let summaries = try await DailyNutritionSummary.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .filter(\.$date >= monthAgo)
+            .sort(\.$date, .ascending)
+            .all()
+
+        if !summaries.isEmpty {
+            return summaries.map { s in
+                DailySummaryResponse(
+                    date: DateFormatter.yyyyMMdd.string(from: s.date),
+                    totalCalories: s.totalCalories,
+                    totalProtein: s.totalProtein,
+                    totalCarbs: s.totalCarbs,
+                    totalFat: s.totalFat,
+                    totalFiber: s.totalFiber,
+                    entryCount: s.entryCount,
+                    goalMet: s.goalMet,
+                    score: s.score
+                )
+            }
+        }
+
+        // Fallback: aggregate from FoodEntry
         let entries = try await FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$eatenAt >= monthAgo)
             .all()
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-
         var dailyMap: [String: [FoodEntry]] = [:]
         for entry in entries {
-            let key = formatter.string(from: entry.eatenAt)
+            let key = DateFormatter.yyyyMMdd.string(from: entry.eatenAt)
             dailyMap[key, default: []].append(entry)
         }
 
@@ -335,8 +346,8 @@ struct NutritionController: RouteCollection {
         let metric = req.query[String.self, at: "metric"] ?? "calories"
         let range = req.query[String.self, at: "range"] ?? "30d"
 
-        let days = Int(range.replacingOccurrences(of: "d", with: "")) ?? 30
-        let calendar = Calendar.current
+        let days = min(Int(range.replacingOccurrences(of: "d", with: "")) ?? 30, 365)
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let startDate = calendar.date(byAdding: .day, value: -days, to: today)!
 
@@ -345,12 +356,9 @@ struct NutritionController: RouteCollection {
             .filter(\.$eatenAt >= startDate)
             .all()
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-
         var dailyMap: [String: Double] = [:]
         for entry in entries {
-            let key = formatter.string(from: entry.eatenAt)
+            let key = DateFormatter.yyyyMMdd.string(from: entry.eatenAt)
             let value: Double
             switch metric {
             case "protein": value = entry.proteinG
@@ -395,40 +403,50 @@ struct NutritionController: RouteCollection {
     @Sendable
     func sync(req: Request) async throws -> NutritionSyncResponse {
         let userID = try req.authenticatedUserID
+        try NutritionSyncRequest.validate(content: req)
         let body = try req.content.decode(NutritionSyncRequest.self)
 
         var synced: [FoodEntryResponse] = []
+        var failedCount = 0
 
-        for entryReq in body.entries {
-            guard let mealType = MealTypeDB(rawValue: entryReq.mealType) ?? MealTypeDB(chinese: entryReq.mealType) else {
-                continue
+        // Use transaction for batch consistency (#3)
+        try await req.db.transaction { db in
+            for entryReq in body.entries {
+                guard let mealType = MealTypeDB(rawValue: entryReq.mealType) ?? MealTypeDB(chinese: entryReq.mealType) else {
+                    failedCount += 1
+                    continue
+                }
+
+                let entry = FoodEntry(
+                    userID: userID,
+                    mealType: mealType,
+                    foodName: entryReq.foodName,
+                    calories: entryReq.calories,
+                    proteinG: entryReq.proteinG ?? 0,
+                    carbsG: entryReq.carbsG ?? 0,
+                    fatG: entryReq.fatG ?? 0,
+                    fiberG: entryReq.fiberG ?? 0,
+                    eatenAt: entryReq.eatenAt ?? Date()
+                )
+                try await entry.save(on: db)
+
+                synced.append(FoodEntryResponse(
+                    id: entry.id!,
+                    mealType: entry.mealType.chinese,
+                    foodName: entry.foodName,
+                    calories: entry.calories,
+                    proteinG: entry.proteinG,
+                    carbsG: entry.carbsG,
+                    fatG: entry.fatG,
+                    fiberG: entry.fiberG,
+                    eatenAt: entry.eatenAt,
+                    dailySummary: nil
+                ))
             }
+        }
 
-            let entry = FoodEntry(
-                userID: userID,
-                mealType: mealType,
-                foodName: entryReq.foodName,
-                calories: entryReq.calories,
-                proteinG: entryReq.proteinG ?? 0,
-                carbsG: entryReq.carbsG ?? 0,
-                fatG: entryReq.fatG ?? 0,
-                fiberG: entryReq.fiberG ?? 0,
-                eatenAt: entryReq.eatenAt ?? Date()
-            )
-            try await entry.save(on: req.db)
-
-            synced.append(FoodEntryResponse(
-                id: entry.id!,
-                mealType: entry.mealType.chinese,
-                foodName: entry.foodName,
-                calories: entry.calories,
-                proteinG: entry.proteinG,
-                carbsG: entry.carbsG,
-                fatG: entry.fatG,
-                fiberG: entry.fiberG,
-                eatenAt: entry.eatenAt,
-                dailySummary: nil
-            ))
+        if failedCount > 0 {
+            req.logger.warning("Nutrition sync: \(failedCount) entries skipped due to invalid meal_type")
         }
 
         return NutritionSyncResponse(synced: synced, serverUpdates: [])
