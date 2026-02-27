@@ -7,7 +7,6 @@ struct AuthController: RouteCollection {
         let auth = routes.grouped("auth")
         auth.post("register", use: register)
         auth.post("login", use: login)
-        auth.post("logout", use: logout)
         auth.delete("account", use: deleteAccount)
     }
 
@@ -19,6 +18,7 @@ struct AuthController: RouteCollection {
             throw Abort(.unauthorized, reason: "Firebase authentication required")
         }
 
+        try? RegisterRequest.validate(content: req)
         let body = try? req.content.decode(RegisterRequest.self)
 
         // Check if user already exists
@@ -95,12 +95,6 @@ struct AuthController: RouteCollection {
             ),
             token: token
         )
-    }
-
-    // MARK: - POST /auth/logout
-    @Sendable
-    func logout(req: Request) async throws -> SuccessResponse {
-        SuccessResponse(message: "Logged out successfully")
     }
 
     // MARK: - DELETE /auth/account

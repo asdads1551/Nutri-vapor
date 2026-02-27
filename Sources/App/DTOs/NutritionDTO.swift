@@ -97,8 +97,15 @@ struct FoodEntryResponse: Content {
     let carbsG: Double
     let fatG: Double
     let fiberG: Double
+    let sugarG: Double
+    let sodiumMg: Double
+    let potassiumMg: Double
+    let calciumMg: Double
+    let ironMg: Double
+    let zincMg: Double
+    let vitaminCMg: Double
+    let vitaminDMcg: Double
     let eatenAt: Date
-    let dailySummary: DailySummaryBrief?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -109,21 +116,15 @@ struct FoodEntryResponse: Content {
         case carbsG = "carbs_g"
         case fatG = "fat_g"
         case fiberG = "fiber_g"
+        case sugarG = "sugar_g"
+        case sodiumMg = "sodium_mg"
+        case potassiumMg = "potassium_mg"
+        case calciumMg = "calcium_mg"
+        case ironMg = "iron_mg"
+        case zincMg = "zinc_mg"
+        case vitaminCMg = "vitamin_c_mg"
+        case vitaminDMcg = "vitamin_d_mcg"
         case eatenAt = "eaten_at"
-        case dailySummary = "daily_summary"
-    }
-}
-
-// MARK: - Daily Summary Brief (embedded in entry response)
-struct DailySummaryBrief: Content {
-    let totalCalories: Double
-    let calorieGoal: Double
-    let progressPct: Int
-
-    enum CodingKeys: String, CodingKey {
-        case totalCalories = "total_calories"
-        case calorieGoal = "calorie_goal"
-        case progressPct = "progress_pct"
     }
 }
 

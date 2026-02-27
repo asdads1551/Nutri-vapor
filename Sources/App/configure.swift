@@ -27,19 +27,31 @@ func configure(_ app: Application) async throws {
         let password = Environment.get("DB_PASSWORD") ?? "nutri_dev"
         let database = Environment.get("DB_NAME") ?? "nutri_db"
 
+        let tlsConfig: SQLPostgresConfiguration.TLS = app.environment == .production ? .require(try .init(configuration: .clientDefault)) : .disable
+        if app.environment != .production {
+            app.logger.warning("Database TLS disabled in development. Enable TLS for production.")
+        }
         let config = SQLPostgresConfiguration(
             hostname: hostname,
             port: port,
             username: username,
             password: password,
             database: database,
-            tls: .disable
+            tls: tlsConfig
         )
         app.databases.use(.postgres(configuration: config), as: .psql)
     }
 
     // MARK: - JWT Configuration (#7)
-    let jwtSecret = Environment.get("JWT_SECRET") ?? "dev-secret-change-in-production"
+    let jwtSecret: String
+    if let envSecret = Environment.get("JWT_SECRET") {
+        jwtSecret = envSecret
+    } else if app.environment == .production {
+        fatalError("JWT_SECRET environment variable is required in production")
+    } else {
+        jwtSecret = "dev-secret-DO-NOT-USE-IN-PRODUCTION"
+        app.logger.warning("Using development JWT secret. Set JWT_SECRET for production.")
+    }
     await app.jwt.keys.add(hmac: .init(from: Data(jwtSecret.utf8)), digestAlgorithm: .sha256)
 
     // MARK: - Server Configuration (#15 graceful shutdown / compression)
@@ -52,6 +64,7 @@ func configure(_ app: Application) async throws {
     if let corsOrigin = Environment.get("CORS_ALLOWED_ORIGIN") {
         allowedOrigin = .custom(corsOrigin)
     } else if app.environment == .production {
+        app.logger.warning("CORS_ALLOWED_ORIGIN not set — all cross-origin requests blocked in production. Set this to your frontend domain.")
         allowedOrigin = .none
     } else {
         allowedOrigin = .all
@@ -75,6 +88,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateHealthSyncLogs())
     app.migrations.add(CreatePushLogs())
     app.migrations.add(CreateNotificationSettings())
+    app.migrations.add(AddMissingIndexes())
 
     // MARK: - Routes
     try routes(app)

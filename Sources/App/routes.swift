@@ -53,6 +53,16 @@ func routes(_ app: Application) throws {
 
     // JWT Auth protected routes (for all business APIs) — with general rate limiting
     let jwtAuth = api.grouped(generalRateLimit).grouped(JWTAuthMiddleware())
+
+    // Logout — under JWT auth so the token can be blacklisted
+    jwtAuth.grouped("auth").post("logout") { req async throws -> SuccessResponse in
+        if let token = req.bearerToken {
+            let expiry = Date().addingTimeInterval(TimeInterval(APIConstants.jwtExpirationMinutes * 60))
+            await TokenBlacklist.shared.revoke(token: token, expiry: expiry)
+        }
+        return SuccessResponse(message: "Logged out successfully")
+    }
+
     try jwtAuth.register(collection: UserController())
     try jwtAuth.register(collection: NutritionController())
     try jwtAuth.register(collection: RecipeController())

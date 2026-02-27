@@ -9,59 +9,6 @@ struct NotificationController: RouteCollection {
         notifications.get("history", use: getHistory)
     }
 
-    // MARK: - Notification Settings DTO
-    struct NotificationSettingsResponse: Content {
-        let mealRemind: Bool
-        let waterRemind: Bool
-        let nutritionAlert: Bool
-        let weeklyReport: Bool
-        let quietHoursStart: String?
-        let quietHoursEnd: String?
-
-        enum CodingKeys: String, CodingKey {
-            case mealRemind = "meal_remind"
-            case waterRemind = "water_remind"
-            case nutritionAlert = "nutrition_alert"
-            case weeklyReport = "weekly_report"
-            case quietHoursStart = "quiet_hours_start"
-            case quietHoursEnd = "quiet_hours_end"
-        }
-    }
-
-    struct UpdateNotificationSettingsRequest: Content {
-        let mealRemind: Bool?
-        let waterRemind: Bool?
-        let nutritionAlert: Bool?
-        let weeklyReport: Bool?
-        let quietHoursStart: String?
-        let quietHoursEnd: String?
-
-        enum CodingKeys: String, CodingKey {
-            case mealRemind = "meal_remind"
-            case waterRemind = "water_remind"
-            case nutritionAlert = "nutrition_alert"
-            case weeklyReport = "weekly_report"
-            case quietHoursStart = "quiet_hours_start"
-            case quietHoursEnd = "quiet_hours_end"
-        }
-    }
-
-    // MARK: - PushLog Response DTO (#13 — avoid leaking internal model fields)
-    struct PushLogResponse: Content {
-        let type: String
-        let title: String
-        let body: String
-        let status: String
-        let sentAt: Date
-        let clickedAt: Date?
-
-        enum CodingKeys: String, CodingKey {
-            case type, title, body, status
-            case sentAt = "sent_at"
-            case clickedAt = "clicked_at"
-        }
-    }
-
     // MARK: - GET /notifications/settings (#12 — persistent storage)
     @Sendable
     func getSettings(req: Request) async throws -> NotificationSettingsResponse {
@@ -85,6 +32,7 @@ struct NotificationController: RouteCollection {
     @Sendable
     func updateSettings(req: Request) async throws -> NotificationSettingsResponse {
         let userID = try req.authenticatedUserID
+        try UpdateNotificationSettingsRequest.validate(content: req)
         let body = try req.content.decode(UpdateNotificationSettingsRequest.self)
 
         let settings: NotificationSetting

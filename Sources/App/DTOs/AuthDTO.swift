@@ -1,13 +1,18 @@
 import Vapor
 
 // MARK: - Register Request
-struct RegisterRequest: Content {
+struct RegisterRequest: Content, Validatable {
     let firstName: String?
     let lastName: String?
 
     enum CodingKeys: String, CodingKey {
         case firstName = "first_name"
         case lastName = "last_name"
+    }
+
+    static func validations(_ validations: inout Validations) {
+        validations.add("first_name", as: String?.self, required: false, is: .nil || .count(1...100))
+        validations.add("last_name", as: String?.self, required: false, is: .nil || .count(1...100))
     }
 }
 

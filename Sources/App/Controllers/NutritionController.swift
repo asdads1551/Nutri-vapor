@@ -16,6 +16,32 @@ struct NutritionController: RouteCollection {
         nutrition.post("sync", use: sync)
     }
 
+    // MARK: - Allowed metrics for trends validation
+    private static let allowedMetrics: Set<String> = ["calories", "protein", "carbs", "fat", "fiber"]
+
+    // MARK: - Helper: convert FoodEntry model to response DTO
+    private func entryResponse(from entry: FoodEntry) -> FoodEntryResponse {
+        FoodEntryResponse(
+            id: entry.id!,
+            mealType: entry.mealType.chinese,
+            foodName: entry.foodName,
+            calories: entry.calories,
+            proteinG: entry.proteinG,
+            carbsG: entry.carbsG,
+            fatG: entry.fatG,
+            fiberG: entry.fiberG,
+            sugarG: entry.sugarG,
+            sodiumMg: entry.sodiumMg,
+            potassiumMg: entry.potassiumMg,
+            calciumMg: entry.calciumMg,
+            ironMg: entry.ironMg,
+            zincMg: entry.zincMg,
+            vitaminCMg: entry.vitaminCMg,
+            vitaminDMcg: entry.vitaminDMcg,
+            eatenAt: entry.eatenAt
+        )
+    }
+
     // MARK: - POST /nutrition/entries
     @Sendable
     func createEntry(req: Request) async throws -> FoodEntryResponse {
@@ -49,24 +75,16 @@ struct NutritionController: RouteCollection {
 
         try await entry.save(on: req.db)
 
-        return FoodEntryResponse(
-            id: entry.id!,
-            mealType: entry.mealType.chinese,
-            foodName: entry.foodName,
-            calories: entry.calories,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            fiberG: entry.fiberG,
-            eatenAt: entry.eatenAt,
-            dailySummary: nil
-        )
+        return entryResponse(from: entry)
     }
 
-    // MARK: - GET /nutrition/entries
+    // MARK: - GET /nutrition/entries (paginated)
     @Sendable
-    func listEntries(req: Request) async throws -> [FoodEntryResponse] {
+    func listEntries(req: Request) async throws -> PagedResponse<FoodEntryResponse> {
         let userID = try req.authenticatedUserID
+        let page = max(1, req.query[Int.self, at: "page"] ?? 1)
+        let limit = min(req.query[Int.self, at: "limit"] ?? APIConstants.defaultPageSize, APIConstants.maxPageSize)
+
         var query = FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
 
@@ -86,24 +104,19 @@ struct NutritionController: RouteCollection {
             query = query.filter(\.$mealType == mealType)
         }
 
+        let total = try await query.count()
         let entries = try await query
             .sort(\.$eatenAt, .ascending)
+            .range(lower: (page - 1) * limit, upper: page * limit)
             .all()
 
-        return entries.map { entry in
-            FoodEntryResponse(
-                id: entry.id!,
-                mealType: entry.mealType.chinese,
-                foodName: entry.foodName,
-                calories: entry.calories,
-                proteinG: entry.proteinG,
-                carbsG: entry.carbsG,
-                fatG: entry.fatG,
-                fiberG: entry.fiberG,
-                eatenAt: entry.eatenAt,
-                dailySummary: nil
-            )
-        }
+        return PagedResponse(
+            data: entries.map { entryResponse(from: $0) },
+            page: page,
+            perPage: limit,
+            total: total,
+            totalPages: max(1, (total + limit - 1) / limit)
+        )
     }
 
     // MARK: - GET /nutrition/entries/:entryID
@@ -121,18 +134,7 @@ struct NutritionController: RouteCollection {
             throw Abort(.notFound, reason: "Entry not found")
         }
 
-        return FoodEntryResponse(
-            id: entry.id!,
-            mealType: entry.mealType.chinese,
-            foodName: entry.foodName,
-            calories: entry.calories,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            fiberG: entry.fiberG,
-            eatenAt: entry.eatenAt,
-            dailySummary: nil
-        )
+        return entryResponse(from: entry)
     }
 
     // MARK: - PATCH /nutrition/entries/:entryID
@@ -162,21 +164,12 @@ struct NutritionController: RouteCollection {
         if let carbsG = body.carbsG { entry.carbsG = carbsG }
         if let fatG = body.fatG { entry.fatG = fatG }
         if let fiberG = body.fiberG { entry.fiberG = fiberG }
+        if let sugarG = body.sugarG { entry.sugarG = sugarG }
+        if let sodiumMg = body.sodiumMg { entry.sodiumMg = sodiumMg }
 
         try await entry.save(on: req.db)
 
-        return FoodEntryResponse(
-            id: entry.id!,
-            mealType: entry.mealType.chinese,
-            foodName: entry.foodName,
-            calories: entry.calories,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            fiberG: entry.fiberG,
-            eatenAt: entry.eatenAt,
-            dailySummary: nil
-        )
+        return entryResponse(from: entry)
     }
 
     // MARK: - DELETE /nutrition/entries/:entryID
@@ -346,7 +339,11 @@ struct NutritionController: RouteCollection {
         let metric = req.query[String.self, at: "metric"] ?? "calories"
         let range = req.query[String.self, at: "range"] ?? "30d"
 
-        let days = min(Int(range.replacingOccurrences(of: "d", with: "")) ?? 30, 365)
+        guard Self.allowedMetrics.contains(metric) else {
+            throw Abort(.badRequest, reason: "Invalid metric. Use: calories, protein, carbs, fat, fiber")
+        }
+
+        let days = min(max(1, Int(range.replacingOccurrences(of: "d", with: "")) ?? 30), 365)
         let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let startDate = calendar.date(byAdding: .day, value: -days, to: today)!
@@ -426,22 +423,19 @@ struct NutritionController: RouteCollection {
                     carbsG: entryReq.carbsG ?? 0,
                     fatG: entryReq.fatG ?? 0,
                     fiberG: entryReq.fiberG ?? 0,
+                    sugarG: entryReq.sugarG ?? 0,
+                    sodiumMg: entryReq.sodiumMg ?? 0,
+                    potassiumMg: entryReq.potassiumMg ?? 0,
+                    calciumMg: entryReq.calciumMg ?? 0,
+                    ironMg: entryReq.ironMg ?? 0,
+                    zincMg: entryReq.zincMg ?? 0,
+                    vitaminCMg: entryReq.vitaminCMg ?? 0,
+                    vitaminDMcg: entryReq.vitaminDMcg ?? 0,
                     eatenAt: entryReq.eatenAt ?? Date()
                 )
                 try await entry.save(on: db)
 
-                synced.append(FoodEntryResponse(
-                    id: entry.id!,
-                    mealType: entry.mealType.chinese,
-                    foodName: entry.foodName,
-                    calories: entry.calories,
-                    proteinG: entry.proteinG,
-                    carbsG: entry.carbsG,
-                    fatG: entry.fatG,
-                    fiberG: entry.fiberG,
-                    eatenAt: entry.eatenAt,
-                    dailySummary: nil
-                ))
+                synced.append(entryResponse(from: entry))
             }
         }
 

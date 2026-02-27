@@ -12,6 +12,35 @@ struct ServerJWTPayload: JWTPayload {
     }
 }
 
+// MARK: - Token Blacklist
+/// In-memory token blacklist for logout/revocation.
+/// For production with multiple instances, replace with Redis-backed implementation.
+actor TokenBlacklist {
+    static let shared = TokenBlacklist()
+
+    /// Maps token → expiry date (auto-cleanup expired entries)
+    private var revokedTokens: [String: Date] = [:]
+    private var lastCleanup = Date()
+    private let cleanupInterval: TimeInterval = 300 // 5 minutes
+
+    func revoke(token: String, expiry: Date) {
+        revokedTokens[token] = expiry
+        cleanupIfNeeded()
+    }
+
+    func isRevoked(_ token: String) -> Bool {
+        cleanupIfNeeded()
+        return revokedTokens[token] != nil
+    }
+
+    private func cleanupIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastCleanup) > cleanupInterval else { return }
+        revokedTokens = revokedTokens.filter { $0.value > now }
+        lastCleanup = now
+    }
+}
+
 /// Middleware to verify server-issued JWT tokens.
 /// Used for all business API endpoints after initial login.
 struct JWTAuthMiddleware: AsyncMiddleware {
@@ -21,12 +50,18 @@ struct JWTAuthMiddleware: AsyncMiddleware {
             throw Abort(.unauthorized, reason: "Missing authorization token")
         }
 
+        // Check token blacklist (revoked on logout)
+        if await TokenBlacklist.shared.isRevoked(bearerToken) {
+            throw Abort(.unauthorized, reason: "Token has been revoked")
+        }
+
         do {
             let payload = try await request.jwt.verify(bearerToken, as: ServerJWTPayload.self)
             guard let userID = UUID(uuidString: payload.sub.value) else {
                 throw Abort(.unauthorized, reason: "Invalid user ID in token")
             }
             request.storage[AuthenticatedUserKey.self] = userID
+            request.storage[BearerTokenKey.self] = bearerToken
         } catch {
             throw Abort(.unauthorized, reason: "Invalid or expired token")
         }
@@ -35,9 +70,13 @@ struct JWTAuthMiddleware: AsyncMiddleware {
     }
 }
 
-// MARK: - Request Storage Key
+// MARK: - Request Storage Keys
 struct AuthenticatedUserKey: StorageKey {
     typealias Value = UUID
+}
+
+struct BearerTokenKey: StorageKey {
+    typealias Value = String
 }
 
 extension Request {
@@ -49,5 +88,10 @@ extension Request {
             }
             return userID
         }
+    }
+
+    /// The raw Bearer token from the current request
+    var bearerToken: String? {
+        storage[BearerTokenKey.self]
     }
 }

@@ -71,13 +71,21 @@ struct HealthController: RouteCollection {
         )
     }
 
+    // MARK: - Allowed health trend metrics
+    private static let allowedHealthMetrics: Set<String> = ["steps", "weight", "active_cal", "heart_rate", "sleep"]
+
     // MARK: - GET /health/trends
     @Sendable
     func healthTrends(req: Request) async throws -> HealthTrendResponse {
         let userID = try req.authenticatedUserID
         let metric = req.query[String.self, at: "metric"] ?? "steps"
         let range = req.query[String.self, at: "range"] ?? "30d"
-        let days = min(Int(range.replacingOccurrences(of: "d", with: "")) ?? 30, 365)
+
+        guard Self.allowedHealthMetrics.contains(metric) else {
+            throw Abort(.badRequest, reason: "Invalid metric. Use: steps, weight, active_cal, heart_rate, sleep")
+        }
+
+        let days = min(max(1, Int(range.replacingOccurrences(of: "d", with: "")) ?? 30), 365)
 
         let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())

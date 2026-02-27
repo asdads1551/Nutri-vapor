@@ -310,19 +310,26 @@ struct RecipeController: RouteCollection {
         return SuccessResponse(message: "Removed from favorites")
     }
 
-    // MARK: - GET /recipes/favorites
+    // MARK: - GET /recipes/favorites (paginated)
     @Sendable
-    func listFavorites(req: Request) async throws -> [RecipeListItem] {
+    func listFavorites(req: Request) async throws -> PagedResponse<RecipeListItem> {
         let userID = try req.authenticatedUserID
+        let page = max(1, req.query[Int.self, at: "page"] ?? 1)
+        let limit = min(req.query[Int.self, at: "limit"] ?? APIConstants.defaultPageSize, APIConstants.maxPageSize)
 
-        let favorites = try await UserFavorite.query(on: req.db)
+        let query = UserFavorite.query(on: req.db)
             .filter(\.$user.$id == userID)
+
+        let total = try await query.count()
+        let favorites = try await query
             .with(\.$recipe) {
                 $0.with(\.$tags)
             }
+            .sort(\.$createdAt, .descending)
+            .range(lower: (page - 1) * limit, upper: page * limit)
             .all()
 
-        return favorites.map { fav in
+        let items = favorites.map { fav in
             let recipe = fav.recipe
             return RecipeListItem(
                 id: recipe.id!,
@@ -337,5 +344,13 @@ struct RecipeController: RouteCollection {
                 isFavorite: true
             )
         }
+
+        return PagedResponse(
+            data: items,
+            page: page,
+            perPage: limit,
+            total: total,
+            totalPages: max(1, (total + limit - 1) / limit)
+        )
     }
 }
