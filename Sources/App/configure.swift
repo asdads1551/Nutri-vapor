@@ -1,13 +1,21 @@
 import Vapor
 import Fluent
 import FluentPostgresDriver
+import JWT
 
 func configure(_ app: Application) async throws {
+    // MARK: - Environment Safety (#19)
+    if app.environment == .production {
+        guard Environment.get("JWT_SECRET") != nil else {
+            fatalError("JWT_SECRET environment variable is required in production")
+        }
+        guard Environment.get("DATABASE_URL") != nil || Environment.get("DB_PASSWORD") != nil else {
+            fatalError("DATABASE_URL or DB_PASSWORD environment variable is required in production")
+        }
+    }
+
     // MARK: - Database Configuration
     if let databaseURL = Environment.get("DATABASE_URL") {
-        var tlsConfig = TLSConfiguration.makeClientConfiguration()
-        tlsConfig.certificateVerification = .none
-
         try app.databases.use(
             .postgres(url: databaseURL),
             as: .psql
@@ -30,9 +38,26 @@ func configure(_ app: Application) async throws {
         app.databases.use(.postgres(configuration: config), as: .psql)
     }
 
+    // MARK: - JWT Configuration (#7)
+    let jwtSecret = Environment.get("JWT_SECRET") ?? "dev-secret-change-in-production"
+    await app.jwt.keys.add(hmac: .init(from: Data(jwtSecret.utf8)), digestAlgorithm: .sha256)
+
+    // MARK: - Server Configuration (#15 graceful shutdown / compression)
+    app.http.server.configuration.requestDecompression = .enabled
+    app.http.server.configuration.responseCompression = .enabled
+
     // MARK: - Middleware
+    // CORS — whitelist in production, permissive in development (#6)
+    let allowedOrigin: CORSMiddleware.AllowOriginSetting
+    if let corsOrigin = Environment.get("CORS_ALLOWED_ORIGIN") {
+        allowedOrigin = .custom(corsOrigin)
+    } else if app.environment == .production {
+        allowedOrigin = .none
+    } else {
+        allowedOrigin = .all
+    }
     app.middleware.use(CORSMiddleware(configuration: .init(
-        allowedOrigin: .all,
+        allowedOrigin: allowedOrigin,
         allowedMethods: [.GET, .POST, .PUT, .PATCH, .DELETE, .OPTIONS],
         allowedHeaders: [.accept, .authorization, .contentType, .origin, .xRequestedWith]
     )))
@@ -49,6 +74,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateUserFavorites())
     app.migrations.add(CreateHealthSyncLogs())
     app.migrations.add(CreatePushLogs())
+    app.migrations.add(CreateNotificationSettings())
 
     // MARK: - Routes
     try routes(app)

@@ -13,33 +13,30 @@ struct RecipeController: RouteCollection {
         recipes.get("favorites", use: listFavorites)
     }
 
-    // MARK: - GET /recipes
+    // MARK: - GET /recipes (#11: fix N+1 — only query favorites for current page recipe IDs)
     @Sendable
-    func listRecipes(req: Request) async throws -> PagedResponse<RecipeListItem> {
+    func listRecipes(req: Request) async throws -> Response {
         let userID = try req.authenticatedUserID
-        let page = req.query[Int.self, at: "page"] ?? 1
+        let page = max(1, req.query[Int.self, at: "page"] ?? 1)
         let limit = min(req.query[Int.self, at: "limit"] ?? APIConstants.defaultPageSize, APIConstants.maxPageSize)
 
         var query = Recipe.query(on: req.db)
             .filter(\.$isPublished == true)
 
-        // Search
         if let search = req.query[String.self, at: "search"] {
-            query = query.filter(\.$name ~~ search)
+            let trimmed = String(search.prefix(200))
+            query = query.filter(\.$name ~~ trimmed)
         }
 
-        // Cuisine type filter
         if let cuisineStr = req.query[String.self, at: "cuisine_type"],
            let cuisine = CuisineTypeDB(rawValue: cuisineStr) ?? CuisineTypeDB(chinese: cuisineStr) {
             query = query.filter(\.$cuisineType == cuisine)
         }
 
-        // Max calories
         if let maxCalories = req.query[Int.self, at: "max_calories"] {
             query = query.filter(\.$calories <= maxCalories)
         }
 
-        // Max cooking time
         if let maxTime = req.query[Int.self, at: "max_cooking_time"] {
             query = query.filter(\.$cookingTimeMin <= maxTime)
         }
@@ -50,11 +47,18 @@ struct RecipeController: RouteCollection {
             .range(lower: (page - 1) * limit, upper: page * limit)
             .all()
 
-        // Get user's favorites
-        let favoriteRecipeIDs = try await UserFavorite.query(on: req.db)
-            .filter(\.$user.$id == userID)
-            .all()
-            .map { $0.$recipe.id }
+        // Only query favorites for the recipe IDs on this page (fixes N+1)
+        let recipeIDs = recipes.compactMap(\.id)
+        let favoriteSet: Set<UUID>
+        if recipeIDs.isEmpty {
+            favoriteSet = []
+        } else {
+            let favorites = try await UserFavorite.query(on: req.db)
+                .filter(\.$user.$id == userID)
+                .filter(\.$recipe.$id ~~ recipeIDs)
+                .all()
+            favoriteSet = Set(favorites.map { $0.$recipe.id })
+        }
 
         let items = recipes.map { recipe in
             RecipeListItem(
@@ -67,22 +71,27 @@ struct RecipeController: RouteCollection {
                 tags: recipe.tags.map { $0.tag.chinese },
                 cuisineType: recipe.cuisineType?.chinese,
                 imageURL: recipe.imageURL,
-                isFavorite: favoriteRecipeIDs.contains(recipe.id!)
+                isFavorite: favoriteSet.contains(recipe.id!)
             )
         }
 
-        return PagedResponse(
+        let body = PagedResponse(
             data: items,
             page: page,
             perPage: limit,
             total: total,
             totalPages: max(1, (total + limit - 1) / limit)
         )
+
+        // (#20) Cache-Control for recipe list — short cache since favorites change
+        let response = try await body.encodeResponse(for: req)
+        response.headers.replaceOrAdd(name: .cacheControl, value: "private, max-age=60")
+        return response
     }
 
     // MARK: - GET /recipes/:recipeID
     @Sendable
-    func getRecipe(req: Request) async throws -> RecipeDetailResponse {
+    func getRecipe(req: Request) async throws -> Response {
         let userID = try req.authenticatedUserID
         guard let recipeID = req.parameters.get("recipeID", as: UUID.self) else {
             throw Abort(.badRequest)
@@ -96,12 +105,13 @@ struct RecipeController: RouteCollection {
             throw Abort(.notFound, reason: "Recipe not found")
         }
 
+        // Use first() instead of count() for efficiency (#11)
         let isFavorite = try await UserFavorite.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$recipe.$id == recipeID)
-            .count() > 0
+            .first() != nil
 
-        return RecipeDetailResponse(
+        let body = RecipeDetailResponse(
             id: recipe.id!,
             name: recipe.name,
             description: recipe.description,
@@ -125,26 +135,38 @@ struct RecipeController: RouteCollection {
             imageURL: recipe.imageURL,
             isFavorite: isFavorite
         )
+
+        // (#20) Recipe detail changes infrequently — cache 5 minutes
+        let response = try await body.encodeResponse(for: req)
+        response.headers.replaceOrAdd(name: .cacheControl, value: "private, max-age=300")
+        return response
     }
 
     // MARK: - GET /recipes/popular
     @Sendable
-    func popularRecipes(req: Request) async throws -> [RecipeListItem] {
+    func popularRecipes(req: Request) async throws -> Response {
         let userID = try req.authenticatedUserID
 
-        // Get recipes sorted by favorite count (simplified)
         let recipes = try await Recipe.query(on: req.db)
             .filter(\.$isPublished == true)
             .with(\.$tags)
             .limit(20)
             .all()
 
-        let favoriteRecipeIDs = try await UserFavorite.query(on: req.db)
-            .filter(\.$user.$id == userID)
-            .all()
-            .map { $0.$recipe.id }
+        // Only query favorites for these recipe IDs (#11)
+        let recipeIDs = recipes.compactMap(\.id)
+        let favoriteSet: Set<UUID>
+        if recipeIDs.isEmpty {
+            favoriteSet = []
+        } else {
+            let favorites = try await UserFavorite.query(on: req.db)
+                .filter(\.$user.$id == userID)
+                .filter(\.$recipe.$id ~~ recipeIDs)
+                .all()
+            favoriteSet = Set(favorites.map { $0.$recipe.id })
+        }
 
-        return recipes.map { recipe in
+        let body = recipes.map { recipe in
             RecipeListItem(
                 id: recipe.id!,
                 name: recipe.name,
@@ -155,18 +177,22 @@ struct RecipeController: RouteCollection {
                 tags: recipe.tags.map { $0.tag.chinese },
                 cuisineType: recipe.cuisineType?.chinese,
                 imageURL: recipe.imageURL,
-                isFavorite: favoriteRecipeIDs.contains(recipe.id!)
+                isFavorite: favoriteSet.contains(recipe.id!)
             )
         }
+
+        // (#20) Popular recipes — cache 5 minutes
+        let response = try await body.encodeResponse(for: req)
+        response.headers.replaceOrAdd(name: .cacheControl, value: "public, max-age=300")
+        return response
     }
 
-    // MARK: - GET /recipes/recommended
+    // MARK: - GET /recipes/recommended (#11: fix hardcoded empty favoriteIDs)
     @Sendable
     func recommendedRecipes(req: Request) async throws -> RecommendedRecipeResponse {
         let userID = try req.authenticatedUserID
 
-        // Get today's nutrition
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
 
@@ -188,12 +214,24 @@ struct RecipeController: RouteCollection {
         let fiberGap = (goals?.fiberG ?? 25) - totalFiber
         let caloriesRemaining = Double(goals?.calories ?? 2000) - totalCalories
 
-        // Find recipes that fill the gaps
         let recipes = try await Recipe.query(on: req.db)
             .filter(\.$isPublished == true)
             .with(\.$tags)
-            .limit(10)
+            .limit(30)
             .all()
+
+        // Query favorites for all candidate recipes at once
+        let recipeIDs = recipes.compactMap(\.id)
+        let favoriteSet: Set<UUID>
+        if recipeIDs.isEmpty {
+            favoriteSet = []
+        } else {
+            let favorites = try await UserFavorite.query(on: req.db)
+                .filter(\.$user.$id == userID)
+                .filter(\.$recipe.$id ~~ recipeIDs)
+                .all()
+            favoriteSet = Set(favorites.map { $0.$recipe.id })
+        }
 
         let items: [RecommendedRecipeItem] = recipes.compactMap { recipe in
             var reason: String?
@@ -207,8 +245,6 @@ struct RecipeController: RouteCollection {
 
             guard let matchReason = reason else { return nil }
 
-            let favoriteIDs: [UUID] = [] // Simplified
-
             return RecommendedRecipeItem(
                 recipe: RecipeListItem(
                     id: recipe.id!,
@@ -220,7 +256,7 @@ struct RecipeController: RouteCollection {
                     tags: recipe.tags.map { $0.tag.chinese },
                     cuisineType: recipe.cuisineType?.chinese,
                     imageURL: recipe.imageURL,
-                    isFavorite: favoriteIDs.contains(recipe.id!)
+                    isFavorite: favoriteSet.contains(recipe.id!)
                 ),
                 matchReason: matchReason
             )
@@ -244,7 +280,6 @@ struct RecipeController: RouteCollection {
             throw Abort(.badRequest)
         }
 
-        // Check if already favorited
         let existing = try await UserFavorite.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$recipe.$id == recipeID)

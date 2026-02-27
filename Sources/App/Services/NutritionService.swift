@@ -7,7 +7,7 @@ struct NutritionService {
 
     /// Calculate and update daily nutrition summary for a user on a given date
     func updateDailySummary(userID: UUID, date: Date) async throws {
-        let calendar = Calendar.current
+        let calendar = Calendar.taipei
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
 

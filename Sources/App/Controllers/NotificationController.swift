@@ -46,48 +46,97 @@ struct NotificationController: RouteCollection {
         }
     }
 
-    // MARK: - GET /notifications/settings
-    /// Note: In the hybrid architecture, notification settings are stored in Firestore.
-    /// This endpoint acts as a proxy/fallback. The iOS app can read from Firestore directly.
+    // MARK: - PushLog Response DTO (#13 — avoid leaking internal model fields)
+    struct PushLogResponse: Content {
+        let type: String
+        let title: String
+        let body: String
+        let status: String
+        let sentAt: Date
+        let clickedAt: Date?
+
+        enum CodingKeys: String, CodingKey {
+            case type, title, body, status
+            case sentAt = "sent_at"
+            case clickedAt = "clicked_at"
+        }
+    }
+
+    // MARK: - GET /notifications/settings (#12 — persistent storage)
     @Sendable
     func getSettings(req: Request) async throws -> NotificationSettingsResponse {
-        _ = try req.authenticatedUserID
-        // Default settings — in production, read from Firestore or local DB
+        let userID = try req.authenticatedUserID
+
+        let settings = try await NotificationSetting.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .first()
+
         return NotificationSettingsResponse(
-            mealRemind: true,
-            waterRemind: true,
-            nutritionAlert: true,
-            weeklyReport: true,
-            quietHoursStart: "22:00",
-            quietHoursEnd: "07:00"
+            mealRemind: settings?.mealRemind ?? true,
+            waterRemind: settings?.waterRemind ?? true,
+            nutritionAlert: settings?.nutritionAlert ?? true,
+            weeklyReport: settings?.weeklyReport ?? true,
+            quietHoursStart: settings?.quietHoursStart ?? "22:00",
+            quietHoursEnd: settings?.quietHoursEnd ?? "07:00"
         )
     }
 
-    // MARK: - PUT /notifications/settings
+    // MARK: - PUT /notifications/settings (#12 — persistent storage)
     @Sendable
     func updateSettings(req: Request) async throws -> NotificationSettingsResponse {
-        _ = try req.authenticatedUserID
+        let userID = try req.authenticatedUserID
         let body = try req.content.decode(UpdateNotificationSettingsRequest.self)
 
-        // TODO: Save to Firestore or local DB
+        let settings: NotificationSetting
+        if let existing = try await NotificationSetting.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .first() {
+            settings = existing
+        } else {
+            settings = NotificationSetting(userID: userID)
+        }
+
+        if let mealRemind = body.mealRemind { settings.mealRemind = mealRemind }
+        if let waterRemind = body.waterRemind { settings.waterRemind = waterRemind }
+        if let nutritionAlert = body.nutritionAlert { settings.nutritionAlert = nutritionAlert }
+        if let weeklyReport = body.weeklyReport { settings.weeklyReport = weeklyReport }
+        if let quietHoursStart = body.quietHoursStart { settings.quietHoursStart = quietHoursStart }
+        if let quietHoursEnd = body.quietHoursEnd { settings.quietHoursEnd = quietHoursEnd }
+
+        try await settings.save(on: req.db)
+
         return NotificationSettingsResponse(
-            mealRemind: body.mealRemind ?? true,
-            waterRemind: body.waterRemind ?? true,
-            nutritionAlert: body.nutritionAlert ?? true,
-            weeklyReport: body.weeklyReport ?? true,
-            quietHoursStart: body.quietHoursStart ?? "22:00",
-            quietHoursEnd: body.quietHoursEnd ?? "07:00"
+            mealRemind: settings.mealRemind,
+            waterRemind: settings.waterRemind,
+            nutritionAlert: settings.nutritionAlert,
+            weeklyReport: settings.weeklyReport,
+            quietHoursStart: settings.quietHoursStart,
+            quietHoursEnd: settings.quietHoursEnd
         )
     }
 
-    // MARK: - GET /notifications/history
+    // MARK: - GET /notifications/history (#13 — use DTO instead of raw model)
     @Sendable
-    func getHistory(req: Request) async throws -> [PushLog] {
+    func getHistory(req: Request) async throws -> [PushLogResponse] {
         let userID = try req.authenticatedUserID
-        return try await PushLog.query(on: req.db)
+        let page = max(1, req.query[Int.self, at: "page"] ?? 1)
+        let limit = min(req.query[Int.self, at: "limit"] ?? 20, 50)
+
+        let logs = try await PushLog.query(on: req.db)
             .filter(\.$user.$id == userID)
             .sort(\.$sentAt, .descending)
-            .limit(50)
+            .range(lower: (page - 1) * limit, upper: page * limit)
             .all()
+
+        return logs.map { log in
+            PushLogResponse(
+                type: log.type.rawValue,
+                title: log.title,
+                body: log.body,
+                status: log.status.rawValue,
+                sentAt: log.sentAt,
+                clickedAt: log.clickedAt
+            )
+        }
     }
 }

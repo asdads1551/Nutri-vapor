@@ -33,6 +33,7 @@ struct UserController: RouteCollection {
     @Sendable
     func updateMe(req: Request) async throws -> UserDetailResponse {
         let userID = try req.authenticatedUserID
+        try UpdateUserRequest.validate(content: req)
         let body = try req.content.decode(UpdateUserRequest.self)
 
         guard let user = try await User.find(userID, on: req.db) else {
@@ -81,6 +82,7 @@ struct UserController: RouteCollection {
     @Sendable
     func updateProfile(req: Request) async throws -> ProfileResponse {
         let userID = try req.authenticatedUserID
+        try UpdateProfileRequest.validate(content: req)
         let body = try req.content.decode(UpdateProfileRequest.self)
 
         let profile: UserProfile
@@ -143,6 +145,7 @@ struct UserController: RouteCollection {
     @Sendable
     func updateGoals(req: Request) async throws -> GoalsResponse {
         let userID = try req.authenticatedUserID
+        try UpdateGoalsRequest.validate(content: req)
         let body = try req.content.decode(UpdateGoalsRequest.self)
 
         let goals: NutritionGoal

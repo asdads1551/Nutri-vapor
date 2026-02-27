@@ -1,28 +1,68 @@
 import Vapor
+import Fluent
 
 func routes(_ app: Application) throws {
-    // Health check
-    app.get("health") { req in
-        ["status": "ok"]
+    // Health check with DB connectivity verification (#14)
+    app.get("health") { req async throws -> HealthCheckResponse in
+        var dbStatus = "disconnected"
+        do {
+            try await req.db.execute(query: .init(string: "SELECT 1"))
+            dbStatus = "connected"
+        } catch {
+            req.logger.error("Health check DB probe failed: \(error)")
+        }
+        return HealthCheckResponse(
+            status: dbStatus == "connected" ? "ok" : "degraded",
+            version: APIConstants.version,
+            database: dbStatus
+        )
     }
 
     // API v1 routes
     let api = app.grouped("api", "v1")
 
     // Public health check
-    api.get("health") { req in
-        ["status": "ok", "version": "1.0.0"]
+    api.get("health") { req async throws -> HealthCheckResponse in
+        var dbStatus = "disconnected"
+        do {
+            try await req.db.execute(query: .init(string: "SELECT 1"))
+            dbStatus = "connected"
+        } catch {
+            req.logger.error("Health check DB probe failed: \(error)")
+        }
+        return HealthCheckResponse(
+            status: dbStatus == "connected" ? "ok" : "degraded",
+            version: APIConstants.version,
+            database: dbStatus
+        )
     }
 
-    // Firebase Auth protected routes (for register/login)
-    let firebaseAuth = api.grouped(FirebaseAuthMiddleware())
+    // Rate limiters (#2)
+    let authRateLimit = RateLimitMiddleware(
+        maxRequests: APIConstants.authRateLimit,
+        windowSeconds: 60
+    )
+    let generalRateLimit = RateLimitMiddleware(
+        maxRequests: APIConstants.generalRateLimit,
+        windowSeconds: 60
+    )
+
+    // Firebase Auth protected routes (for register/login) — with strict rate limiting
+    let firebaseAuth = api.grouped(authRateLimit).grouped(FirebaseAuthMiddleware())
     try firebaseAuth.register(collection: AuthController())
 
-    // JWT Auth protected routes (for all business APIs)
-    let jwtAuth = api.grouped(JWTAuthMiddleware())
+    // JWT Auth protected routes (for all business APIs) — with general rate limiting
+    let jwtAuth = api.grouped(generalRateLimit).grouped(JWTAuthMiddleware())
     try jwtAuth.register(collection: UserController())
     try jwtAuth.register(collection: NutritionController())
     try jwtAuth.register(collection: RecipeController())
     try jwtAuth.register(collection: HealthController())
     try jwtAuth.register(collection: NotificationController())
+}
+
+// MARK: - Health Check Response
+struct HealthCheckResponse: Content {
+    let status: String
+    let version: String
+    let database: String
 }

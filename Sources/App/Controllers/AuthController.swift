@@ -25,7 +25,6 @@ struct AuthController: RouteCollection {
         if let existingUser = try await User.query(on: req.db)
             .filter(\.$firebaseUID == firebaseUser.uid)
             .first() {
-            // User exists, return login response
             let token = try await generateJWT(for: existingUser, req: req)
             return AuthResponse(
                 user: .init(
@@ -39,22 +38,25 @@ struct AuthController: RouteCollection {
             )
         }
 
-        // Create new user
+        // Create new user with all related records in a transaction (#3)
         let user = User(
             firebaseUID: firebaseUser.uid,
             email: firebaseUser.email,
             firstName: body?.firstName,
             lastName: body?.lastName
         )
-        try await user.save(on: req.db)
 
-        // Create default profile
-        let profile = UserProfile(userID: user.id!, displayName: body?.firstName)
-        try await profile.save(on: req.db)
+        try await req.db.transaction { db in
+            try await user.save(on: db)
 
-        // Create default nutrition goals
-        let goals = NutritionGoal(userID: user.id!)
-        try await goals.save(on: req.db)
+            let profile = UserProfile(userID: user.id!, displayName: body?.firstName)
+            try await profile.save(on: db)
+
+            let goals = NutritionGoal(userID: user.id!)
+            try await goals.save(on: db)
+        }
+
+        req.logger.info("New user registered: \(user.id!)")
 
         let token = try await generateJWT(for: user, req: req)
         return AuthResponse(
@@ -98,12 +100,11 @@ struct AuthController: RouteCollection {
     // MARK: - POST /auth/logout
     @Sendable
     func logout(req: Request) async throws -> SuccessResponse {
-        // Server-side session cleanup if needed
         SuccessResponse(message: "Logged out successfully")
     }
 
     // MARK: - DELETE /auth/account
-    /// Delete user account (App Store compliance requirement)
+    /// Delete user account and ALL related data (App Store / GDPR compliance) (#4)
     @Sendable
     func deleteAccount(req: Request) async throws -> SuccessResponse {
         guard let firebaseUser = req.firebaseUser else {
@@ -116,8 +117,22 @@ struct AuthController: RouteCollection {
             throw Abort(.notFound, reason: "User not found")
         }
 
-        // Soft delete
-        try await user.delete(on: req.db)
+        let userID = user.id!
+
+        // Delete all related data in a transaction, then hard-delete the user
+        try await req.db.transaction { db in
+            try await FoodEntry.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await DailyNutritionSummary.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await HealthSyncLog.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await UserFavorite.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await PushLog.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await NutritionGoal.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await NotificationSetting.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await UserProfile.query(on: db).filter(\.$user.$id == userID).delete(force: true)
+            try await user.delete(force: true, on: db)
+        }
+
+        req.logger.info("Account deleted for user: \(userID)")
         return SuccessResponse(message: "Account deleted successfully")
     }
 
