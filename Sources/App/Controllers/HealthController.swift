@@ -100,19 +100,20 @@ struct HealthController: RouteCollection {
         for log in logs {
             let dateStr = DateFormatter.yyyyMMdd.string(from: log.date)
 
-            // Compute stepsChange on the fly
-            let stepsChange: Double?
-            if let current = log.steps, let prev = previousSteps, prev > 0 {
-                stepsChange = Double(current - prev) / Double(prev) * 100.0
+            // Compute stepsChange on the fly (default 0 if no previous data)
+            let currentSteps = log.steps ?? 0
+            let stepsChange: Double
+            if let prev = previousSteps, prev > 0 {
+                stepsChange = Double(currentSteps - prev) / Double(prev) * 100.0
             } else {
-                stepsChange = nil
+                stepsChange = 0
             }
 
             results.append(HealthSummaryResponse(
                 date: dateStr,
-                steps: log.steps,
+                steps: currentSteps,
                 stepsChange: stepsChange,
-                activeCalories: log.activeCalories,
+                activeCalories: Int(log.activeCalories ?? 0),
                 weight: log.weightKg,
                 heartRate: log.heartRate,
                 sleepHours: log.sleepHours
@@ -121,14 +122,14 @@ struct HealthController: RouteCollection {
             previousSteps = log.steps
         }
 
-        // If no logs found for single-day query, return empty entry
+        // If no logs found for single-day query, return zero-valued entry
         if results.isEmpty {
             let dateStr = DateFormatter.yyyyMMdd.string(from: fromDate)
             results.append(HealthSummaryResponse(
                 date: dateStr,
-                steps: nil,
-                stepsChange: nil,
-                activeCalories: nil,
+                steps: 0,
+                stepsChange: 0,
+                activeCalories: 0,
                 weight: nil,
                 heartRate: nil,
                 sleepHours: nil

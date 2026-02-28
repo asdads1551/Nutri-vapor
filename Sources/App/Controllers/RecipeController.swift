@@ -18,12 +18,22 @@ struct RecipeController: RouteCollection {
     // MARK: - Helper: Build RecipeResponse from Model
 
     private func buildRecipeResponse(_ recipe: Recipe, isFavorite: Bool, includeIngredients: Bool = false) -> RecipeResponse {
-        RecipeResponse(
+        // Always provide ingredients array (empty if not loaded) — frontend expects non-optional
+        let ingredientsList: [IngredientResponse]
+        if includeIngredients {
+            ingredientsList = recipe.ingredients.sorted(by: { $0.sortOrder < $1.sortOrder }).map {
+                IngredientResponse(name: $0.name, amount: $0.amount)
+            }
+        } else {
+            ingredientsList = []
+        }
+
+        return RecipeResponse(
             id: recipe.id!.uuidString,
             name: recipe.name,
             description: recipe.description,
-            iconName: recipe.iconName,
-            iconBackgroundColorHex: recipe.iconBackgroundColorHex,
+            iconName: recipe.iconName ?? "fork.knife",
+            iconBackgroundColorHex: recipe.iconBackgroundColorHex ?? "#4CAF50",
             calories: recipe.calories,
             protein: recipe.proteinG,
             carbs: recipe.carbsG,
@@ -35,9 +45,7 @@ struct RecipeController: RouteCollection {
             price: Int(recipe.priceNtd),
             tags: recipe.tags.map { $0.tag.rawValue },
             allergens: recipe.allergens.map { $0.allergen },
-            ingredients: includeIngredients ? recipe.ingredients.sorted(by: { $0.sortOrder < $1.sortOrder }).map {
-                IngredientResponse(name: $0.name, amount: $0.amount)
-            } : nil,
+            ingredients: ingredientsList,
             steps: recipe.steps,
             cuisineType: recipe.cuisineType?.rawValue,
             imageUrl: recipe.imageURL,
@@ -51,6 +59,7 @@ struct RecipeController: RouteCollection {
     }
 
     // MARK: - GET /recipes
+    // Frontend expects [RecipeResponse] array (not PagedResponse)
     @Sendable
     func listRecipes(req: Request) async throws -> Response {
         let userID = try req.authenticatedUserID
@@ -60,14 +69,29 @@ struct RecipeController: RouteCollection {
         var query = Recipe.query(on: req.db)
             .filter(\.$isPublished == true)
 
-        if let search = req.query[String.self, at: "search"] {
+        // Accept both "q" (frontend) and "search" (legacy) for search
+        if let search = req.query[String.self, at: "q"] ?? req.query[String.self, at: "search"] {
             let trimmed = String(search.prefix(200))
             query = query.filter(\.$name ~~ trimmed)
         }
 
-        if let cuisineStr = req.query[String.self, at: "cuisine_type"],
+        // Accept both "cuisine" (frontend) and "cuisine_type" (legacy)
+        if let cuisineStr = req.query[String.self, at: "cuisine"] ?? req.query[String.self, at: "cuisine_type"],
            let cuisine = CuisineTypeDB(rawValue: cuisineStr) ?? CuisineTypeDB(chinese: cuisineStr) {
             query = query.filter(\.$cuisineType == cuisine)
+        }
+
+        // Tags filter: comma-separated string (e.g., "high_protein,vegan")
+        if let tagsStr = req.query[String.self, at: "tags"] {
+            let tagValues = tagsStr.split(separator: ",").compactMap { RecipeTagDB(rawValue: String($0.trimmingCharacters(in: .whitespaces))) }
+            if !tagValues.isEmpty {
+                // Get recipe IDs that have ALL the specified tags
+                let taggedRecipeIDs = try await RecipeTagModel.query(on: req.db)
+                    .filter(\.$tag ~~ tagValues)
+                    .all()
+                let recipeIDSet = Set(taggedRecipeIDs.map { $0.$recipe.id })
+                query = query.filter(\.$id ~~ recipeIDSet)
+            }
         }
 
         if let maxCalories = req.query[Int.self, at: "max_calories"] {
@@ -78,7 +102,6 @@ struct RecipeController: RouteCollection {
             query = query.filter(\.$cookingTimeMin <= maxTime)
         }
 
-        let total = try await query.count()
         let recipes = try await query
             .with(\.$tags)
             .with(\.$allergens)
@@ -98,19 +121,12 @@ struct RecipeController: RouteCollection {
             favoriteSet = Set(favorites.map { $0.$recipe.id })
         }
 
+        // Return plain array (matching frontend [RecipeResponse] expectation)
         let items = recipes.map { recipe in
             buildRecipeResponse(recipe, isFavorite: favoriteSet.contains(recipe.id!))
         }
 
-        let body = PagedResponse(
-            items: items,
-            page: page,
-            perPage: limit,
-            total: total,
-            totalPages: max(1, (total + limit - 1) / limit)
-        )
-
-        let response = try await body.encodeResponse(for: req)
+        let response = try await items.encodeResponse(for: req)
         response.headers.replaceOrAdd(name: .cacheControl, value: "private, max-age=60")
         return response
     }

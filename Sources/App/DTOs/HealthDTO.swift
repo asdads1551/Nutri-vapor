@@ -31,11 +31,12 @@ struct HealthSyncRequest: Content, Validatable {
 }
 
 // MARK: - Health Summary Response (frontend-aligned)
+// Frontend expects steps/activeCalories as non-optional Int, stepsChange as non-optional Double
 struct HealthSummaryResponse: Content {
     let date: String
-    let steps: Int?
-    let stepsChange: Double?
-    let activeCalories: Double?
+    let steps: Int
+    let stepsChange: Double
+    let activeCalories: Int
     let weight: Double?
     let heartRate: Int?
     let sleepHours: Double?
