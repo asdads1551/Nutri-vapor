@@ -19,13 +19,19 @@ struct UserController: RouteCollection {
         guard let user = try await User.find(userID, on: req.db) else {
             throw Abort(.notFound, reason: "User not found")
         }
+
+        let profile = try await UserProfile.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .first()
+
         return UserDetailResponse(
-            id: user.id!,
+            id: user.id!.uuidString,
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
-            isPremium: user.isPremium,
-            createdAt: user.createdAt
+            avatarUrl: profile?.avatarURL,
+            dateCreated: user.createdAt,
+            lastLoginDate: user.lastLoginDate
         )
     }
 
@@ -46,13 +52,32 @@ struct UserController: RouteCollection {
 
         try await user.save(on: req.db)
 
+        // Update avatarUrl on UserProfile if provided
+        if let avatarUrl = body.avatarUrl {
+            let profile: UserProfile
+            if let existing = try await UserProfile.query(on: req.db)
+                .filter(\.$user.$id == userID)
+                .first() {
+                profile = existing
+            } else {
+                profile = UserProfile(userID: userID)
+            }
+            profile.avatarURL = avatarUrl
+            try await profile.save(on: req.db)
+        }
+
+        let profile = try await UserProfile.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .first()
+
         return UserDetailResponse(
-            id: user.id!,
+            id: user.id!.uuidString,
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
-            isPremium: user.isPremium,
-            createdAt: user.createdAt
+            avatarUrl: profile?.avatarURL,
+            dateCreated: user.createdAt,
+            lastLoginDate: user.lastLoginDate
         )
     }
 
@@ -60,21 +85,27 @@ struct UserController: RouteCollection {
     @Sendable
     func getProfile(req: Request) async throws -> ProfileResponse {
         let userID = try req.authenticatedUserID
+
         let profile = try await UserProfile.query(on: req.db)
             .filter(\.$user.$id == userID)
             .first()
 
+        let preference = try await UserPreference.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .first()
+
         return ProfileResponse(
-            displayName: profile?.displayName,
-            avatarURL: profile?.avatarURL,
-            gender: profile?.gender?.rawValue,
-            birthDate: profile?.birthDate,
-            heightCm: profile?.heightCm,
-            weightKg: profile?.weightKg,
-            activityLevel: profile?.activityLevel?.rawValue,
-            dietType: profile?.dietType?.chinese,
-            calorieGoal: profile?.calorieGoal,
-            allergies: profile?.allergies
+            dietType: profile?.dietType?.rawValue,
+            allergens: profile?.allergies,
+            cuisinePreferences: profile?.cuisinePreferences,
+            preferHighProtein: profile?.preferHighProtein ?? false,
+            preferLowCarb: profile?.preferLowCarb ?? false,
+            preferLowSodium: profile?.preferLowSodium ?? false,
+            preferLowSugar: profile?.preferLowSugar ?? false,
+            avoidSpicy: profile?.avoidSpicy ?? false,
+            language: preference?.language,
+            theme: preference?.theme,
+            onboardingCompleted: preference?.onboardingCompleted ?? false
         )
     }
 
@@ -85,6 +116,7 @@ struct UserController: RouteCollection {
         try UpdateProfileRequest.validate(content: req)
         let body = try req.content.decode(UpdateProfileRequest.self)
 
+        // Update dietary fields on UserProfile
         let profile: UserProfile
         if let existing = try await UserProfile.query(on: req.db)
             .filter(\.$user.$id == userID)
@@ -94,29 +126,47 @@ struct UserController: RouteCollection {
             profile = UserProfile(userID: userID)
         }
 
-        if let displayName = body.displayName { profile.displayName = displayName }
-        if let gender = body.gender { profile.gender = Gender(rawValue: gender) }
-        if let birthDate = body.birthDate { profile.birthDate = birthDate }
-        if let heightCm = body.heightCm { profile.heightCm = heightCm }
-        if let weightKg = body.weightKg { profile.weightKg = weightKg }
-        if let activityLevel = body.activityLevel { profile.activityLevel = ActivityLevel(rawValue: activityLevel) }
-        if let dietType = body.dietType { profile.dietType = DietTypeDB(rawValue: dietType) ?? DietTypeDB(chinese: dietType) }
-        if let calorieGoal = body.calorieGoal { profile.calorieGoal = calorieGoal }
-        if let allergies = body.allergies { profile.allergies = allergies }
+        if let dietType = body.dietType {
+            profile.dietType = DietTypeDB(rawValue: dietType) ?? DietTypeDB(chinese: dietType)
+        }
+        if let allergens = body.allergens { profile.allergies = allergens }
+        if let cuisinePreferences = body.cuisinePreferences { profile.cuisinePreferences = cuisinePreferences }
+        if let preferHighProtein = body.preferHighProtein { profile.preferHighProtein = preferHighProtein }
+        if let preferLowCarb = body.preferLowCarb { profile.preferLowCarb = preferLowCarb }
+        if let preferLowSodium = body.preferLowSodium { profile.preferLowSodium = preferLowSodium }
+        if let preferLowSugar = body.preferLowSugar { profile.preferLowSugar = preferLowSugar }
+        if let avoidSpicy = body.avoidSpicy { profile.avoidSpicy = avoidSpicy }
 
         try await profile.save(on: req.db)
 
+        // Update app settings on UserPreference
+        let preference: UserPreference
+        if let existing = try await UserPreference.query(on: req.db)
+            .filter(\.$user.$id == userID)
+            .first() {
+            preference = existing
+        } else {
+            preference = UserPreference(userID: userID)
+        }
+
+        if let language = body.language { preference.language = language }
+        if let theme = body.theme { preference.theme = theme }
+        if let onboardingCompleted = body.onboardingCompleted { preference.onboardingCompleted = onboardingCompleted }
+
+        try await preference.save(on: req.db)
+
         return ProfileResponse(
-            displayName: profile.displayName,
-            avatarURL: profile.avatarURL,
-            gender: profile.gender?.rawValue,
-            birthDate: profile.birthDate,
-            heightCm: profile.heightCm,
-            weightKg: profile.weightKg,
-            activityLevel: profile.activityLevel?.rawValue,
-            dietType: profile.dietType?.chinese,
-            calorieGoal: profile.calorieGoal,
-            allergies: profile.allergies
+            dietType: profile.dietType?.rawValue,
+            allergens: profile.allergies,
+            cuisinePreferences: profile.cuisinePreferences,
+            preferHighProtein: profile.preferHighProtein,
+            preferLowCarb: profile.preferLowCarb,
+            preferLowSodium: profile.preferLowSodium,
+            preferLowSugar: profile.preferLowSugar,
+            avoidSpicy: profile.avoidSpicy,
+            language: preference.language,
+            theme: preference.theme,
+            onboardingCompleted: preference.onboardingCompleted
         )
     }
 
@@ -124,20 +174,19 @@ struct UserController: RouteCollection {
     @Sendable
     func getGoals(req: Request) async throws -> GoalsResponse {
         let userID = try req.authenticatedUserID
-        let goals = try await NutritionGoal.query(on: req.db)
+        let goal = try await NutritionGoal.query(on: req.db)
             .filter(\.$user.$id == userID)
             .sort(\.$effectiveDate, .descending)
             .first()
 
         return GoalsResponse(
-            calories: goals?.calories ?? 2000,
-            proteinG: goals?.proteinG ?? 60,
-            carbsG: goals?.carbsG ?? 250,
-            fatG: goals?.fatG ?? 65,
-            fiberG: goals?.fiberG ?? 25,
-            sugarG: goals?.sugarG ?? 50,
-            sodiumMg: goals?.sodiumMg ?? 2300,
-            waterMl: goals?.waterMl ?? 2000
+            calorieGoal: Double(goal?.calories ?? 2000),
+            proteinGoal: goal?.proteinG ?? 60,
+            carbsGoal: goal?.carbsG ?? 250,
+            fatGoal: goal?.fatG ?? 65,
+            fiberGoal: goal?.fiberG ?? 25,
+            sugarGoal: goal?.sugarG ?? 50,
+            sodiumGoal: goal?.sodiumMg ?? 2300
         )
     }
 
@@ -148,36 +197,34 @@ struct UserController: RouteCollection {
         try UpdateGoalsRequest.validate(content: req)
         let body = try req.content.decode(UpdateGoalsRequest.self)
 
-        let goals: NutritionGoal
+        let goal: NutritionGoal
         if let existing = try await NutritionGoal.query(on: req.db)
             .filter(\.$user.$id == userID)
             .sort(\.$effectiveDate, .descending)
             .first() {
-            goals = existing
+            goal = existing
         } else {
-            goals = NutritionGoal(userID: userID)
+            goal = NutritionGoal(userID: userID)
         }
 
-        if let calories = body.calories { goals.calories = calories }
-        if let proteinG = body.proteinG { goals.proteinG = proteinG }
-        if let carbsG = body.carbsG { goals.carbsG = carbsG }
-        if let fatG = body.fatG { goals.fatG = fatG }
-        if let fiberG = body.fiberG { goals.fiberG = fiberG }
-        if let sugarG = body.sugarG { goals.sugarG = sugarG }
-        if let sodiumMg = body.sodiumMg { goals.sodiumMg = sodiumMg }
-        if let waterMl = body.waterMl { goals.waterMl = waterMl }
+        if let v = body.calorieGoal { goal.calories = Int(v) }
+        if let v = body.proteinGoal { goal.proteinG = v }
+        if let v = body.carbsGoal { goal.carbsG = v }
+        if let v = body.fatGoal { goal.fatG = v }
+        if let v = body.fiberGoal { goal.fiberG = v }
+        if let v = body.sugarGoal { goal.sugarG = v }
+        if let v = body.sodiumGoal { goal.sodiumMg = v }
 
-        try await goals.save(on: req.db)
+        try await goal.save(on: req.db)
 
         return GoalsResponse(
-            calories: goals.calories,
-            proteinG: goals.proteinG,
-            carbsG: goals.carbsG,
-            fatG: goals.fatG,
-            fiberG: goals.fiberG,
-            sugarG: goals.sugarG,
-            sodiumMg: goals.sodiumMg,
-            waterMl: goals.waterMl
+            calorieGoal: Double(goal.calories),
+            proteinGoal: goal.proteinG,
+            carbsGoal: goal.carbsG,
+            fatGoal: goal.fatG,
+            fiberGoal: goal.fiberG,
+            sugarGoal: goal.sugarG,
+            sodiumGoal: goal.sodiumMg
         )
     }
 }

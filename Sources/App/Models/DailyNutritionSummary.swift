@@ -18,6 +18,15 @@ final class DailyNutritionSummary: Model, Content, @unchecked Sendable {
     @Field(key: "entry_count") var entryCount: Int
     @Field(key: "goal_met") var goalMet: Bool
     @Field(key: "score") var score: Int
+
+    // Micronutrient totals (frontend-aligned)
+    @Field(key: "total_potassium") var totalPotassium: Double
+    @Field(key: "total_calcium") var totalCalcium: Double
+    @Field(key: "total_iron") var totalIron: Double
+    @Field(key: "total_zinc") var totalZinc: Double
+    @Field(key: "total_vitamin_c") var totalVitaminC: Double
+    @Field(key: "total_vitamin_d") var totalVitaminD: Double
+
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
 
     init() {}

@@ -1,12 +1,18 @@
 import Vapor
 
-// MARK: - Paginated Response
+// MARK: - Paginated Response (frontend uses "items" key)
 struct PagedResponse<T: Content>: Content {
-    let data: [T]
+    let items: [T]
     let page: Int
     let perPage: Int
     let total: Int
     let totalPages: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items, page, total
+        case perPage = "per_page"
+        case totalPages = "total_pages"
+    }
 }
 
 // MARK: - Error Response

@@ -1,12 +1,15 @@
 import Vapor
 import Fluent
+import SQLKit
 
 func routes(_ app: Application) throws {
     // Health check with DB connectivity verification (#14)
     app.get("health") { req async throws -> HealthCheckResponse in
         var dbStatus = "disconnected"
         do {
-            try await req.db.execute(query: .init(string: "SELECT 1"))
+            if let sqlDB = req.db as? any SQLDatabase {
+                _ = try await sqlDB.raw("SELECT 1").all()
+            }
             dbStatus = "connected"
         } catch {
             req.logger.error("Health check DB probe failed: \(error)")
@@ -25,7 +28,9 @@ func routes(_ app: Application) throws {
     api.get("health") { req async throws -> HealthCheckResponse in
         var dbStatus = "disconnected"
         do {
-            try await req.db.execute(query: .init(string: "SELECT 1"))
+            if let sqlDB = req.db as? any SQLDatabase {
+                _ = try await sqlDB.raw("SELECT 1").all()
+            }
             dbStatus = "connected"
         } catch {
             req.logger.error("Health check DB probe failed: \(error)")
@@ -47,9 +52,9 @@ func routes(_ app: Application) throws {
         windowSeconds: 60
     )
 
-    // Firebase Auth protected routes (for register/login) — with strict rate limiting
-    let firebaseAuth = api.grouped(authRateLimit).grouped(FirebaseAuthMiddleware())
-    try firebaseAuth.register(collection: AuthController())
+    // Auth routes — rate limited, Firebase token verified in controller from body
+    let authRoutes = api.grouped(authRateLimit)
+    try authRoutes.register(collection: AuthController())
 
     // JWT Auth protected routes (for all business APIs) — with general rate limiting
     let jwtAuth = api.grouped(generalRateLimit).grouped(JWTAuthMiddleware())

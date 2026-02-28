@@ -1,48 +1,51 @@
 import Vapor
 
-// MARK: - Health Sync Request
+// MARK: - Health Sync Request (frontend-aligned)
 struct HealthSyncRequest: Content, Validatable {
-    let date: Date
+    let date: String
     let steps: Int?
-    let activeCal: Double?
-    let weightKg: Double?
+    let stepsChange: Double?
+    let activeCalories: Double?
+    let weight: Double?
+    let weightChange: Double?
     let heartRate: Int?
     let sleepHours: Double?
 
     enum CodingKeys: String, CodingKey {
-        case date, steps
-        case activeCal = "active_cal"
-        case weightKg = "weight_kg"
+        case date, steps, weight
+        case stepsChange = "steps_change"
+        case activeCalories = "active_calories"
+        case weightChange = "weight_change"
         case heartRate = "heart_rate"
         case sleepHours = "sleep_hours"
     }
 
     static func validations(_ validations: inout Validations) {
-        validations.add("steps", as: Int?.self, required: false, is: .nil || .range(0...500000))
-        validations.add("active_cal", as: Double?.self, required: false, is: .nil || .range(0...50000))
-        validations.add("weight_kg", as: Double?.self, required: false, is: .nil || .range(10...500))
-        validations.add("heart_rate", as: Int?.self, required: false, is: .nil || .range(20...300))
-        validations.add("sleep_hours", as: Double?.self, required: false, is: .nil || .range(0...24))
+        validations.add("date", as: String.self, is: .count(10...10))
+        validations.add("steps", as: Int?.self, is: .nil || .range(0...500000), required: false)
+        validations.add("active_calories", as: Double?.self, is: .nil || .range(0...50000), required: false)
+        validations.add("weight", as: Double?.self, is: .nil || .range(10...500), required: false)
+        validations.add("heart_rate", as: Int?.self, is: .nil || .range(20...300), required: false)
+        validations.add("sleep_hours", as: Double?.self, is: .nil || .range(0...24), required: false)
     }
 }
 
-// MARK: - Health Summary Response
+// MARK: - Health Summary Response (frontend-aligned)
 struct HealthSummaryResponse: Content {
     let date: String
     let steps: Int?
-    let activeCal: Double?
-    let weightKg: Double?
+    let stepsChange: Double?
+    let activeCalories: Double?
+    let weight: Double?
     let heartRate: Int?
     let sleepHours: Double?
-    let nutritionScore: Int?
 
     enum CodingKeys: String, CodingKey {
-        case date, steps
-        case activeCal = "active_cal"
-        case weightKg = "weight_kg"
+        case date, steps, weight
+        case stepsChange = "steps_change"
+        case activeCalories = "active_calories"
         case heartRate = "heart_rate"
         case sleepHours = "sleep_hours"
-        case nutritionScore = "nutrition_score"
     }
 }
 

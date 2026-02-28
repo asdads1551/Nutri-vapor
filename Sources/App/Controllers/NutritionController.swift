@@ -1,6 +1,11 @@
 import Vapor
 import Fluent
 
+/// Thread-safe counter for use inside Sendable closures (e.g. db.transaction)
+private final class SyncCounter: @unchecked Sendable {
+    var value: Int = 0
+}
+
 struct NutritionController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let nutrition = routes.grouped("nutrition")
@@ -14,6 +19,53 @@ struct NutritionController: RouteCollection {
         nutrition.get("summary", "monthly", use: monthlySummary)
         nutrition.get("trends", use: trends)
         nutrition.post("sync", use: sync)
+    }
+
+    // MARK: - Helper: Build FoodEntryResponse from Model
+
+    private func buildEntryResponse(_ entry: FoodEntry) -> FoodEntryResponse {
+        FoodEntryResponse(
+            id: entry.id!.uuidString,
+            name: entry.foodName,
+            calories: entry.calories,
+            carbs: entry.carbsG,
+            protein: entry.proteinG,
+            fat: entry.fatG,
+            fiber: entry.fiberG,
+            sugar: entry.sugarG,
+            sodium: entry.sodiumMg,
+            potassium: entry.potassiumMg,
+            calcium: entry.calciumMg,
+            iron: entry.ironMg,
+            zinc: entry.zincMg,
+            vitaminC: entry.vitaminCMg,
+            vitaminD: entry.vitaminDMcg,
+            mealType: entry.mealType.rawValue,
+            imageUrl: entry.imageURL,
+            timestamp: entry.eatenAt
+        )
+    }
+
+    // MARK: - Helper: Build DailySummaryResponse from entries
+
+    private func buildDailySummary(date: String?, entries: [FoodEntry]) -> DailySummaryResponse {
+        DailySummaryResponse(
+            date: date,
+            totalCalories: entries.reduce(0.0) { $0 + $1.calories },
+            totalCarbs: entries.reduce(0.0) { $0 + $1.carbsG },
+            totalProtein: entries.reduce(0.0) { $0 + $1.proteinG },
+            totalFat: entries.reduce(0.0) { $0 + $1.fatG },
+            totalFiber: entries.reduce(0.0) { $0 + $1.fiberG },
+            totalSugar: entries.reduce(0.0) { $0 + $1.sugarG },
+            totalSodium: entries.reduce(0.0) { $0 + $1.sodiumMg },
+            totalPotassium: entries.reduce(0.0) { $0 + $1.potassiumMg },
+            totalCalcium: entries.reduce(0.0) { $0 + $1.calciumMg },
+            totalIron: entries.reduce(0.0) { $0 + $1.ironMg },
+            totalZinc: entries.reduce(0.0) { $0 + $1.zincMg },
+            totalVitaminC: entries.reduce(0.0) { $0 + $1.vitaminCMg },
+            totalVitaminD: entries.reduce(0.0) { $0 + $1.vitaminDMcg },
+            entryCount: entries.count
+        )
     }
 
     // MARK: - POST /nutrition/entries
@@ -30,37 +82,27 @@ struct NutritionController: RouteCollection {
         let entry = FoodEntry(
             userID: userID,
             mealType: mealType,
-            foodName: body.foodName,
+            foodName: body.name,
             calories: body.calories,
-            proteinG: body.proteinG ?? 0,
-            carbsG: body.carbsG ?? 0,
-            fatG: body.fatG ?? 0,
-            fiberG: body.fiberG ?? 0,
-            sugarG: body.sugarG ?? 0,
-            sodiumMg: body.sodiumMg ?? 0,
-            potassiumMg: body.potassiumMg ?? 0,
-            calciumMg: body.calciumMg ?? 0,
-            ironMg: body.ironMg ?? 0,
-            zincMg: body.zincMg ?? 0,
-            vitaminCMg: body.vitaminCMg ?? 0,
-            vitaminDMcg: body.vitaminDMcg ?? 0,
-            eatenAt: body.eatenAt ?? Date()
+            proteinG: body.protein ?? 0,
+            carbsG: body.carbs ?? 0,
+            fatG: body.fat ?? 0,
+            fiberG: body.fiber ?? 0,
+            sugarG: body.sugar ?? 0,
+            sodiumMg: body.sodium ?? 0,
+            potassiumMg: body.potassium ?? 0,
+            calciumMg: body.calcium ?? 0,
+            ironMg: body.iron ?? 0,
+            zincMg: body.zinc ?? 0,
+            vitaminCMg: body.vitaminC ?? 0,
+            vitaminDMcg: body.vitaminD ?? 0,
+            eatenAt: body.timestamp ?? Date()
         )
+        entry.imageURL = body.imageUrl
 
         try await entry.save(on: req.db)
 
-        return FoodEntryResponse(
-            id: entry.id!,
-            mealType: entry.mealType.chinese,
-            foodName: entry.foodName,
-            calories: entry.calories,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            fiberG: entry.fiberG,
-            eatenAt: entry.eatenAt,
-            dailySummary: nil
-        )
+        return buildEntryResponse(entry)
     }
 
     // MARK: - GET /nutrition/entries
@@ -70,7 +112,7 @@ struct NutritionController: RouteCollection {
         var query = FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
 
-        // Filter by date (#17/#18: use shared formatter with explicit timezone)
+        // Filter by date
         if let dateStr = req.query[String.self, at: "date"] {
             if let date = DateFormatter.yyyyMMdd.date(from: dateStr) {
                 let nextDay = Calendar.taipei.date(byAdding: .day, value: 1, to: date)!
@@ -90,20 +132,7 @@ struct NutritionController: RouteCollection {
             .sort(\.$eatenAt, .ascending)
             .all()
 
-        return entries.map { entry in
-            FoodEntryResponse(
-                id: entry.id!,
-                mealType: entry.mealType.chinese,
-                foodName: entry.foodName,
-                calories: entry.calories,
-                proteinG: entry.proteinG,
-                carbsG: entry.carbsG,
-                fatG: entry.fatG,
-                fiberG: entry.fiberG,
-                eatenAt: entry.eatenAt,
-                dailySummary: nil
-            )
-        }
+        return entries.map { buildEntryResponse($0) }
     }
 
     // MARK: - GET /nutrition/entries/:entryID
@@ -121,18 +150,7 @@ struct NutritionController: RouteCollection {
             throw Abort(.notFound, reason: "Entry not found")
         }
 
-        return FoodEntryResponse(
-            id: entry.id!,
-            mealType: entry.mealType.chinese,
-            foodName: entry.foodName,
-            calories: entry.calories,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            fiberG: entry.fiberG,
-            eatenAt: entry.eatenAt,
-            dailySummary: nil
-        )
+        return buildEntryResponse(entry)
     }
 
     // MARK: - PATCH /nutrition/entries/:entryID
@@ -156,27 +174,15 @@ struct NutritionController: RouteCollection {
            let mealType = MealTypeDB(rawValue: mealTypeStr) ?? MealTypeDB(chinese: mealTypeStr) {
             entry.mealType = mealType
         }
-        if let foodName = body.foodName { entry.foodName = foodName }
+        if let name = body.name { entry.foodName = name }
         if let calories = body.calories { entry.calories = calories }
-        if let proteinG = body.proteinG { entry.proteinG = proteinG }
-        if let carbsG = body.carbsG { entry.carbsG = carbsG }
-        if let fatG = body.fatG { entry.fatG = fatG }
-        if let fiberG = body.fiberG { entry.fiberG = fiberG }
+        if let protein = body.protein { entry.proteinG = protein }
+        if let carbs = body.carbs { entry.carbsG = carbs }
+        if let fat = body.fat { entry.fatG = fat }
 
         try await entry.save(on: req.db)
 
-        return FoodEntryResponse(
-            id: entry.id!,
-            mealType: entry.mealType.chinese,
-            foodName: entry.foodName,
-            calories: entry.calories,
-            proteinG: entry.proteinG,
-            carbsG: entry.carbsG,
-            fatG: entry.fatG,
-            fiberG: entry.fiberG,
-            eatenAt: entry.eatenAt,
-            dailySummary: nil
-        )
+        return buildEntryResponse(entry)
     }
 
     // MARK: - DELETE /nutrition/entries/:entryID
@@ -216,30 +222,7 @@ struct NutritionController: RouteCollection {
             .filter(\.$eatenAt < nextDay)
             .all()
 
-        let totalCalories = entries.reduce(0.0) { $0 + $1.calories }
-        let totalProtein = entries.reduce(0.0) { $0 + $1.proteinG }
-        let totalCarbs = entries.reduce(0.0) { $0 + $1.carbsG }
-        let totalFat = entries.reduce(0.0) { $0 + $1.fatG }
-        let totalFiber = entries.reduce(0.0) { $0 + $1.fiberG }
-
-        let goals = try await NutritionGoal.query(on: req.db)
-            .filter(\.$user.$id == userID)
-            .first()
-        let calorieGoal = Double(goals?.calories ?? 2000)
-        let goalMet = totalCalories >= calorieGoal * 0.8 && totalCalories <= calorieGoal * 1.2
-        let score = calorieGoal > 0 ? min(100, Int((totalCalories / calorieGoal) * 100)) : 0
-
-        return DailySummaryResponse(
-            date: dateStr,
-            totalCalories: totalCalories,
-            totalProtein: totalProtein,
-            totalCarbs: totalCarbs,
-            totalFat: totalFat,
-            totalFiber: totalFiber,
-            entryCount: entries.count,
-            goalMet: goalMet,
-            score: score
-        )
+        return buildDailySummary(date: dateStr, entries: entries)
     }
 
     // MARK: - GET /nutrition/summary/weekly
@@ -266,22 +249,11 @@ struct NutritionController: RouteCollection {
             let date = calendar.date(byAdding: .day, value: -offset, to: today)!
             let key = DateFormatter.yyyyMMdd.string(from: date)
             let dayEntries = dailyMap[key] ?? []
-
-            return DailySummaryResponse(
-                date: key,
-                totalCalories: dayEntries.reduce(0) { $0 + $1.calories },
-                totalProtein: dayEntries.reduce(0) { $0 + $1.proteinG },
-                totalCarbs: dayEntries.reduce(0) { $0 + $1.carbsG },
-                totalFat: dayEntries.reduce(0) { $0 + $1.fatG },
-                totalFiber: dayEntries.reduce(0) { $0 + $1.fiberG },
-                entryCount: dayEntries.count,
-                goalMet: false,
-                score: 0
-            )
+            return buildDailySummary(date: key, entries: dayEntries)
         }.reversed()
     }
 
-    // MARK: - GET /nutrition/summary/monthly (#21: use DailyNutritionSummary pre-aggregated data)
+    // MARK: - GET /nutrition/summary/monthly
     @Sendable
     func monthlySummary(req: Request) async throws -> [DailySummaryResponse] {
         let userID = try req.authenticatedUserID
@@ -301,13 +273,19 @@ struct NutritionController: RouteCollection {
                 DailySummaryResponse(
                     date: DateFormatter.yyyyMMdd.string(from: s.date),
                     totalCalories: s.totalCalories,
-                    totalProtein: s.totalProtein,
                     totalCarbs: s.totalCarbs,
+                    totalProtein: s.totalProtein,
                     totalFat: s.totalFat,
                     totalFiber: s.totalFiber,
-                    entryCount: s.entryCount,
-                    goalMet: s.goalMet,
-                    score: s.score
+                    totalSugar: s.totalSugar,
+                    totalSodium: s.totalSodium,
+                    totalPotassium: s.totalPotassium,
+                    totalCalcium: s.totalCalcium,
+                    totalIron: s.totalIron,
+                    totalZinc: s.totalZinc,
+                    totalVitaminC: s.totalVitaminC,
+                    totalVitaminD: s.totalVitaminD,
+                    entryCount: s.entryCount
                 )
             }
         }
@@ -325,18 +303,8 @@ struct NutritionController: RouteCollection {
         }
 
         return dailyMap.map { (key, dayEntries) in
-            DailySummaryResponse(
-                date: key,
-                totalCalories: dayEntries.reduce(0) { $0 + $1.calories },
-                totalProtein: dayEntries.reduce(0) { $0 + $1.proteinG },
-                totalCarbs: dayEntries.reduce(0) { $0 + $1.carbsG },
-                totalFat: dayEntries.reduce(0) { $0 + $1.fatG },
-                totalFiber: dayEntries.reduce(0) { $0 + $1.fiberG },
-                entryCount: dayEntries.count,
-                goalMet: false,
-                score: 0
-            )
-        }.sorted { $0.date < $1.date }
+            buildDailySummary(date: key, entries: dayEntries)
+        }.sorted { ($0.date ?? "") < ($1.date ?? "") }
     }
 
     // MARK: - GET /nutrition/trends
@@ -406,49 +374,88 @@ struct NutritionController: RouteCollection {
         try NutritionSyncRequest.validate(content: req)
         let body = try req.content.decode(NutritionSyncRequest.self)
 
-        var synced: [FoodEntryResponse] = []
-        var failedCount = 0
+        let counter = SyncCounter()
 
-        // Use transaction for batch consistency (#3)
         try await req.db.transaction { db in
-            for entryReq in body.entries {
-                guard let mealType = MealTypeDB(rawValue: entryReq.mealType) ?? MealTypeDB(chinese: entryReq.mealType) else {
-                    failedCount += 1
-                    continue
+            for syncEntry in body.entries {
+                switch syncEntry.action {
+                case "create":
+                    guard let data = syncEntry.data else { continue }
+                    guard let mealType = MealTypeDB(rawValue: data.mealType) ?? MealTypeDB(chinese: data.mealType) else {
+                        continue
+                    }
+
+                    let entry = FoodEntry(
+                        userID: userID,
+                        mealType: mealType,
+                        foodName: data.name,
+                        calories: data.calories,
+                        proteinG: data.protein ?? 0,
+                        carbsG: data.carbs ?? 0,
+                        fatG: data.fat ?? 0,
+                        fiberG: data.fiber ?? 0,
+                        sugarG: data.sugar ?? 0,
+                        sodiumMg: data.sodium ?? 0,
+                        potassiumMg: data.potassium ?? 0,
+                        calciumMg: data.calcium ?? 0,
+                        ironMg: data.iron ?? 0,
+                        zincMg: data.zinc ?? 0,
+                        vitaminCMg: data.vitaminC ?? 0,
+                        vitaminDMcg: data.vitaminD ?? 0,
+                        eatenAt: data.timestamp ?? Date()
+                    )
+                    entry.imageURL = data.imageUrl
+                    try await entry.save(on: db)
+                    counter.value += 1
+
+                case "update":
+                    guard let idStr = syncEntry.id,
+                          let entryID = UUID(uuidString: idStr) else { continue }
+                    guard let existing = try await FoodEntry.query(on: db)
+                        .filter(\.$id == entryID)
+                        .filter(\.$user.$id == userID)
+                        .first() else { continue }
+
+                    if let data = syncEntry.data {
+                        if let mealType = MealTypeDB(rawValue: data.mealType) ?? MealTypeDB(chinese: data.mealType) {
+                            existing.mealType = mealType
+                        }
+                        existing.foodName = data.name
+                        existing.calories = data.calories
+                        existing.proteinG = data.protein ?? existing.proteinG
+                        existing.carbsG = data.carbs ?? existing.carbsG
+                        existing.fatG = data.fat ?? existing.fatG
+                        existing.fiberG = data.fiber ?? existing.fiberG
+                        existing.sugarG = data.sugar ?? existing.sugarG
+                        existing.sodiumMg = data.sodium ?? existing.sodiumMg
+                        existing.potassiumMg = data.potassium ?? existing.potassiumMg
+                        existing.calciumMg = data.calcium ?? existing.calciumMg
+                        existing.ironMg = data.iron ?? existing.ironMg
+                        existing.zincMg = data.zinc ?? existing.zincMg
+                        existing.vitaminCMg = data.vitaminC ?? existing.vitaminCMg
+                        existing.vitaminDMcg = data.vitaminD ?? existing.vitaminDMcg
+                        if let ts = data.timestamp { existing.eatenAt = ts }
+                        if let imageUrl = data.imageUrl { existing.imageURL = imageUrl }
+                    }
+                    try await existing.save(on: db)
+                    counter.value += 1
+
+                case "delete":
+                    guard let idStr = syncEntry.id,
+                          let entryID = UUID(uuidString: idStr) else { continue }
+                    guard let existing = try await FoodEntry.query(on: db)
+                        .filter(\.$id == entryID)
+                        .filter(\.$user.$id == userID)
+                        .first() else { continue }
+                    try await existing.delete(force: true, on: db)
+                    counter.value += 1
+
+                default:
+                    req.logger.warning("Nutrition sync: unknown action '\(syncEntry.action)'")
                 }
-
-                let entry = FoodEntry(
-                    userID: userID,
-                    mealType: mealType,
-                    foodName: entryReq.foodName,
-                    calories: entryReq.calories,
-                    proteinG: entryReq.proteinG ?? 0,
-                    carbsG: entryReq.carbsG ?? 0,
-                    fatG: entryReq.fatG ?? 0,
-                    fiberG: entryReq.fiberG ?? 0,
-                    eatenAt: entryReq.eatenAt ?? Date()
-                )
-                try await entry.save(on: db)
-
-                synced.append(FoodEntryResponse(
-                    id: entry.id!,
-                    mealType: entry.mealType.chinese,
-                    foodName: entry.foodName,
-                    calories: entry.calories,
-                    proteinG: entry.proteinG,
-                    carbsG: entry.carbsG,
-                    fatG: entry.fatG,
-                    fiberG: entry.fiberG,
-                    eatenAt: entry.eatenAt,
-                    dailySummary: nil
-                ))
             }
         }
 
-        if failedCount > 0 {
-            req.logger.warning("Nutrition sync: \(failedCount) entries skipped due to invalid meal_type")
-        }
-
-        return NutritionSyncResponse(synced: synced, serverUpdates: [])
+        return NutritionSyncResponse(synced: counter.value, conflicts: nil)
     }
 }

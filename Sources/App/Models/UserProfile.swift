@@ -16,6 +16,15 @@ final class UserProfile: Model, Content, @unchecked Sendable {
     @Field(key: "diet_type") var dietType: DietTypeDB?
     @Field(key: "calorie_goal") var calorieGoal: Int?
     @Field(key: "allergies") var allergies: [String]?
+
+    // Dietary preferences (frontend-aligned)
+    @Field(key: "cuisine_preferences") var cuisinePreferences: [String]?
+    @Field(key: "prefer_high_protein") var preferHighProtein: Bool
+    @Field(key: "prefer_low_carb") var preferLowCarb: Bool
+    @Field(key: "prefer_low_sodium") var preferLowSodium: Bool
+    @Field(key: "prefer_low_sugar") var preferLowSugar: Bool
+    @Field(key: "avoid_spicy") var avoidSpicy: Bool
+
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
 
     init() {}
@@ -28,5 +37,10 @@ final class UserProfile: Model, Content, @unchecked Sendable {
         self.id = id
         self.$user.id = userID
         self.displayName = displayName
+        self.preferHighProtein = false
+        self.preferLowCarb = false
+        self.preferLowSodium = false
+        self.preferLowSugar = false
+        self.avoidSpicy = false
     }
 }

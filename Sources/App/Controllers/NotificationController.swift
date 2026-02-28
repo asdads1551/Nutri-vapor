@@ -9,44 +9,40 @@ struct NotificationController: RouteCollection {
         notifications.get("history", use: getHistory)
     }
 
-    // MARK: - Notification Settings DTO
+    // MARK: - Notification Settings DTO (frontend-aligned, no weeklyReport)
     struct NotificationSettingsResponse: Content {
         let mealRemind: Bool
         let waterRemind: Bool
         let nutritionAlert: Bool
-        let weeklyReport: Bool
-        let quietHoursStart: String?
-        let quietHoursEnd: String?
+        let quietHoursStart: String
+        let quietHoursEnd: String
 
         enum CodingKeys: String, CodingKey {
             case mealRemind = "meal_remind"
             case waterRemind = "water_remind"
             case nutritionAlert = "nutrition_alert"
-            case weeklyReport = "weekly_report"
             case quietHoursStart = "quiet_hours_start"
             case quietHoursEnd = "quiet_hours_end"
         }
     }
 
     struct UpdateNotificationSettingsRequest: Content {
-        let mealRemind: Bool?
-        let waterRemind: Bool?
-        let nutritionAlert: Bool?
-        let weeklyReport: Bool?
-        let quietHoursStart: String?
-        let quietHoursEnd: String?
+        let mealRemind: Bool
+        let waterRemind: Bool
+        let nutritionAlert: Bool
+        let quietHoursStart: String
+        let quietHoursEnd: String
 
         enum CodingKeys: String, CodingKey {
             case mealRemind = "meal_remind"
             case waterRemind = "water_remind"
             case nutritionAlert = "nutrition_alert"
-            case weeklyReport = "weekly_report"
             case quietHoursStart = "quiet_hours_start"
             case quietHoursEnd = "quiet_hours_end"
         }
     }
 
-    // MARK: - PushLog Response DTO (#13 — avoid leaking internal model fields)
+    // MARK: - PushLog Response DTO
     struct PushLogResponse: Content {
         let type: String
         let title: String
@@ -62,7 +58,7 @@ struct NotificationController: RouteCollection {
         }
     }
 
-    // MARK: - GET /notifications/settings (#12 — persistent storage)
+    // MARK: - GET /notifications/settings
     @Sendable
     func getSettings(req: Request) async throws -> NotificationSettingsResponse {
         let userID = try req.authenticatedUserID
@@ -75,13 +71,12 @@ struct NotificationController: RouteCollection {
             mealRemind: settings?.mealRemind ?? true,
             waterRemind: settings?.waterRemind ?? true,
             nutritionAlert: settings?.nutritionAlert ?? true,
-            weeklyReport: settings?.weeklyReport ?? true,
             quietHoursStart: settings?.quietHoursStart ?? "22:00",
             quietHoursEnd: settings?.quietHoursEnd ?? "07:00"
         )
     }
 
-    // MARK: - PUT /notifications/settings (#12 — persistent storage)
+    // MARK: - PUT /notifications/settings
     @Sendable
     func updateSettings(req: Request) async throws -> NotificationSettingsResponse {
         let userID = try req.authenticatedUserID
@@ -96,12 +91,13 @@ struct NotificationController: RouteCollection {
             settings = NotificationSetting(userID: userID)
         }
 
-        if let mealRemind = body.mealRemind { settings.mealRemind = mealRemind }
-        if let waterRemind = body.waterRemind { settings.waterRemind = waterRemind }
-        if let nutritionAlert = body.nutritionAlert { settings.nutritionAlert = nutritionAlert }
-        if let weeklyReport = body.weeklyReport { settings.weeklyReport = weeklyReport }
-        if let quietHoursStart = body.quietHoursStart { settings.quietHoursStart = quietHoursStart }
-        if let quietHoursEnd = body.quietHoursEnd { settings.quietHoursEnd = quietHoursEnd }
+        settings.mealRemind = body.mealRemind
+        settings.waterRemind = body.waterRemind
+        settings.nutritionAlert = body.nutritionAlert
+        // weeklyReport not exposed in DTO but still written to DB with default true
+        settings.weeklyReport = true
+        settings.quietHoursStart = body.quietHoursStart
+        settings.quietHoursEnd = body.quietHoursEnd
 
         try await settings.save(on: req.db)
 
@@ -109,13 +105,12 @@ struct NotificationController: RouteCollection {
             mealRemind: settings.mealRemind,
             waterRemind: settings.waterRemind,
             nutritionAlert: settings.nutritionAlert,
-            weeklyReport: settings.weeklyReport,
-            quietHoursStart: settings.quietHoursStart,
-            quietHoursEnd: settings.quietHoursEnd
+            quietHoursStart: settings.quietHoursStart ?? "22:00",
+            quietHoursEnd: settings.quietHoursEnd ?? "07:00"
         )
     }
 
-    // MARK: - GET /notifications/history (#13 — use DTO instead of raw model)
+    // MARK: - GET /notifications/history
     @Sendable
     func getHistory(req: Request) async throws -> [PushLogResponse] {
         let userID = try req.authenticatedUserID
