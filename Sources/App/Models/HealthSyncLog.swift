@@ -8,7 +8,7 @@ final class HealthSyncLog: Model, Content, @unchecked Sendable {
     @Parent(key: "user_id") var user: User
     @Field(key: "date") var date: Date
     @Field(key: "steps") var steps: Int?
-    @Field(key: "active_cal") var activeCal: Double?
+    @Field(key: "active_calories") var activeCalories: Double?
     @Field(key: "weight_kg") var weightKg: Double?
     @Field(key: "heart_rate") var heartRate: Int?
     @Field(key: "sleep_hours") var sleepHours: Double?

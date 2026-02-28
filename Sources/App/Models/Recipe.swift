@@ -21,6 +21,14 @@ final class Recipe: Model, Content, @unchecked Sendable {
     @Field(key: "cuisine_type") var cuisineType: CuisineTypeDB?
     @Field(key: "steps") var steps: [String]?
     @Field(key: "is_published") var isPublished: Bool
+
+    // Frontend-aligned fields
+    @Field(key: "icon_name") var iconName: String?
+    @Field(key: "icon_background_color_hex") var iconBackgroundColorHex: String?
+    @OptionalParent(key: "author_id") var author: User?
+    @Field(key: "image_base64") var imageBase64: String?
+    @Field(key: "audio_url") var audioURL: String?
+
     @Timestamp(key: "created_at", on: .create) var createdAt: Date?
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
 
@@ -28,6 +36,7 @@ final class Recipe: Model, Content, @unchecked Sendable {
     @Children(for: \.$recipe) var tags: [RecipeTagModel]
     @Children(for: \.$recipe) var ingredients: [RecipeIngredient]
     @Children(for: \.$recipe) var favorites: [UserFavorite]
+    @Children(for: \.$recipe) var allergens: [RecipeAllergen]
 
     init() {}
 

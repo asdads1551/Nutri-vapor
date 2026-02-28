@@ -1,154 +1,143 @@
 import Vapor
 
-// MARK: - Create Food Entry Request
+// MARK: - Create Food Entry Request (frontend-aligned)
+// Frontend property -> wire format -> DB column mapping:
+//   name -> name -> food_name
+//   carbs -> carbs -> carbs_g
+//   protein -> protein -> protein_g
+//   vitaminC -> vitamin_c -> vitamin_c_mg
+//   timestamp -> timestamp -> eaten_at
 struct CreateFoodEntryRequest: Content, Validatable {
-    let mealType: String
-    let foodName: String
-    let portionSize: Double?
-    let portionUnit: String?
+    let name: String
     let calories: Double
-    let proteinG: Double?
-    let carbsG: Double?
-    let fatG: Double?
-    let fiberG: Double?
-    let sugarG: Double?
-    let sodiumMg: Double?
-    let potassiumMg: Double?
-    let calciumMg: Double?
-    let ironMg: Double?
-    let zincMg: Double?
-    let vitaminCMg: Double?
-    let vitaminDMcg: Double?
-    let eatenAt: Date?
+    let carbs: Double?
+    let protein: Double?
+    let fat: Double?
+    let fiber: Double?
+    let sugar: Double?
+    let sodium: Double?
+    let potassium: Double?
+    let calcium: Double?
+    let iron: Double?
+    let zinc: Double?
+    let vitaminC: Double?
+    let vitaminD: Double?
+    let mealType: String
+    let imageUrl: String?
+    let timestamp: Date?
 
     enum CodingKeys: String, CodingKey {
+        case name, calories, carbs, protein, fat, fiber, sugar, sodium
+        case potassium, calcium, iron, zinc
+        case vitaminC = "vitamin_c"
+        case vitaminD = "vitamin_d"
         case mealType = "meal_type"
-        case foodName = "food_name"
-        case portionSize = "portion_size"
-        case portionUnit = "portion_unit"
-        case calories
-        case proteinG = "protein_g"
-        case carbsG = "carbs_g"
-        case fatG = "fat_g"
-        case fiberG = "fiber_g"
-        case sugarG = "sugar_g"
-        case sodiumMg = "sodium_mg"
-        case potassiumMg = "potassium_mg"
-        case calciumMg = "calcium_mg"
-        case ironMg = "iron_mg"
-        case zincMg = "zinc_mg"
-        case vitaminCMg = "vitamin_c_mg"
-        case vitaminDMcg = "vitamin_d_mcg"
-        case eatenAt = "eaten_at"
+        case imageUrl = "image_url"
+        case timestamp
     }
 
     static func validations(_ validations: inout Validations) {
-        validations.add("food_name", as: String.self, is: .count(1...200))
+        validations.add("name", as: String.self, is: .count(1...200))
         validations.add("calories", as: Double.self, is: .range(0...50000))
-        validations.add("protein_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
-        validations.add("carbs_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
-        validations.add("fat_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
-        validations.add("fiber_g", as: Double?.self, required: false, is: .nil || .range(0...500))
-        validations.add("sugar_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
-        validations.add("sodium_mg", as: Double?.self, required: false, is: .nil || .range(0...100000))
+        validations.add("protein", as: Double?.self, is: .nil || .range(0...2000), required: false)
+        validations.add("carbs", as: Double?.self, is: .nil || .range(0...2000), required: false)
+        validations.add("fat", as: Double?.self, is: .nil || .range(0...2000), required: false)
+        validations.add("fiber", as: Double?.self, is: .nil || .range(0...500), required: false)
+        validations.add("sugar", as: Double?.self, is: .nil || .range(0...2000), required: false)
+        validations.add("sodium", as: Double?.self, is: .nil || .range(0...100000), required: false)
+        validations.add("image_url", as: String?.self, is: .nil || .count(1...2048), required: false)
     }
 }
 
-// MARK: - Update Food Entry Request
+// MARK: - Update Food Entry Request (frontend-aligned)
 struct UpdateFoodEntryRequest: Content, Validatable {
-    let mealType: String?
-    let foodName: String?
+    let name: String?
     let calories: Double?
-    let proteinG: Double?
-    let carbsG: Double?
-    let fatG: Double?
-    let fiberG: Double?
-    let sugarG: Double?
-    let sodiumMg: Double?
+    let carbs: Double?
+    let protein: Double?
+    let fat: Double?
+    let mealType: String?
 
     enum CodingKeys: String, CodingKey {
+        case name, calories, carbs, protein, fat
         case mealType = "meal_type"
-        case foodName = "food_name"
-        case calories
-        case proteinG = "protein_g"
-        case carbsG = "carbs_g"
-        case fatG = "fat_g"
-        case fiberG = "fiber_g"
-        case sugarG = "sugar_g"
-        case sodiumMg = "sodium_mg"
     }
 
     static func validations(_ validations: inout Validations) {
-        validations.add("food_name", as: String?.self, required: false, is: .nil || .count(1...200))
-        validations.add("calories", as: Double?.self, required: false, is: .nil || .range(0...50000))
-        validations.add("protein_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
-        validations.add("carbs_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
-        validations.add("fat_g", as: Double?.self, required: false, is: .nil || .range(0...2000))
+        validations.add("name", as: String?.self, is: .nil || .count(1...200), required: false)
+        validations.add("calories", as: Double?.self, is: .nil || .range(0...50000), required: false)
+        validations.add("protein", as: Double?.self, is: .nil || .range(0...2000), required: false)
+        validations.add("carbs", as: Double?.self, is: .nil || .range(0...2000), required: false)
+        validations.add("fat", as: Double?.self, is: .nil || .range(0...2000), required: false)
     }
 }
 
-// MARK: - Food Entry Response
+// MARK: - Food Entry Response (frontend-aligned)
 struct FoodEntryResponse: Content {
-    let id: UUID
-    let mealType: String
-    let foodName: String
+    let id: String
+    let name: String
     let calories: Double
-    let proteinG: Double
-    let carbsG: Double
-    let fatG: Double
-    let fiberG: Double
-    let eatenAt: Date
-    let dailySummary: DailySummaryBrief?
+    let carbs: Double
+    let protein: Double
+    let fat: Double
+    let fiber: Double
+    let sugar: Double
+    let sodium: Double
+    let potassium: Double
+    let calcium: Double
+    let iron: Double
+    let zinc: Double
+    let vitaminC: Double
+    let vitaminD: Double
+    let mealType: String
+    let imageUrl: String?
+    let timestamp: Date
 
     enum CodingKeys: String, CodingKey {
-        case id
+        case id, name, calories, carbs, protein, fat, fiber, sugar, sodium
+        case potassium, calcium, iron, zinc
+        case vitaminC = "vitamin_c"
+        case vitaminD = "vitamin_d"
         case mealType = "meal_type"
-        case foodName = "food_name"
-        case calories
-        case proteinG = "protein_g"
-        case carbsG = "carbs_g"
-        case fatG = "fat_g"
-        case fiberG = "fiber_g"
-        case eatenAt = "eaten_at"
-        case dailySummary = "daily_summary"
+        case imageUrl = "image_url"
+        case timestamp
     }
 }
 
-// MARK: - Daily Summary Brief (embedded in entry response)
-struct DailySummaryBrief: Content {
-    let totalCalories: Double
-    let calorieGoal: Double
-    let progressPct: Int
-
-    enum CodingKeys: String, CodingKey {
-        case totalCalories = "total_calories"
-        case calorieGoal = "calorie_goal"
-        case progressPct = "progress_pct"
-    }
-}
-
-// MARK: - Daily Summary Response
+// MARK: - Daily Summary Response (frontend-aligned: NutritionSummaryResponse)
 struct DailySummaryResponse: Content {
-    let date: String
+    let date: String?
     let totalCalories: Double
-    let totalProtein: Double
     let totalCarbs: Double
+    let totalProtein: Double
     let totalFat: Double
     let totalFiber: Double
+    let totalSugar: Double
+    let totalSodium: Double
+    let totalPotassium: Double
+    let totalCalcium: Double
+    let totalIron: Double
+    let totalZinc: Double
+    let totalVitaminC: Double
+    let totalVitaminD: Double
     let entryCount: Int
-    let goalMet: Bool
-    let score: Int
 
     enum CodingKeys: String, CodingKey {
         case date
         case totalCalories = "total_calories"
-        case totalProtein = "total_protein"
         case totalCarbs = "total_carbs"
+        case totalProtein = "total_protein"
         case totalFat = "total_fat"
         case totalFiber = "total_fiber"
+        case totalSugar = "total_sugar"
+        case totalSodium = "total_sodium"
+        case totalPotassium = "total_potassium"
+        case totalCalcium = "total_calcium"
+        case totalIron = "total_iron"
+        case totalZinc = "total_zinc"
+        case totalVitaminC = "total_vitamin_c"
+        case totalVitaminD = "total_vitamin_d"
         case entryCount = "entry_count"
-        case goalMet = "goal_met"
-        case score
     }
 }
 
@@ -173,28 +162,45 @@ struct TrendResponse: Content {
     }
 }
 
-// MARK: - Sync Request
+// MARK: - Sync Request (frontend-aligned: supports create/update/delete actions)
 struct NutritionSyncRequest: Content, Validatable {
-    let entries: [CreateFoodEntryRequest]
-    let lastSyncAt: Date?
+    let entries: [SyncEntry]
+    let lastSyncedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case entries
-        case lastSyncAt = "last_sync_at"
+        case lastSyncedAt = "last_synced_at"
     }
 
     static func validations(_ validations: inout Validations) {
-        validations.add("entries", as: [CreateFoodEntryRequest].self, is: .count(...APIConstants.maxSyncBatchSize))
+        validations.add("entries", as: [SyncEntry].self, is: .count(...APIConstants.maxSyncBatchSize))
     }
 }
 
-// MARK: - Sync Response
-struct NutritionSyncResponse: Content {
-    let synced: [FoodEntryResponse]
-    let serverUpdates: [FoodEntryResponse]
+struct SyncEntry: Content {
+    let id: String?
+    let data: CreateFoodEntryRequest?
+    let action: String   // "create", "update", "delete"
+    let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case synced
-        case serverUpdates = "server_updates"
+        case id, data, action
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: - Sync Response (frontend-aligned)
+struct NutritionSyncResponse: Content {
+    let synced: Int
+    let conflicts: [SyncConflict]?
+}
+
+struct SyncConflict: Content {
+    let id: String
+    let serverVersion: FoodEntryResponse
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case serverVersion = "server_version"
     }
 }
