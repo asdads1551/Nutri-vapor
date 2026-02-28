@@ -100,6 +100,10 @@ struct UpdateProfileRequest: Content, Validatable {
 
     static func validations(_ validations: inout Validations) {
         validations.add("diet_type", as: String?.self, is: .nil || .count(1...50), required: false)
+        // Note: allergens and cuisinePreferences arrays are limited to 20 elements,
+        // but individual element string length is not validated here because Vapor's
+        // Validatable does not support per-element validation in arrays.
+        // Server-side controllers should enforce per-element length limits if needed.
         validations.add("allergens", as: [String]?.self, is: .nil || .count(...20), required: false)
         validations.add("cuisine_preferences", as: [String]?.self, is: .nil || .count(...20), required: false)
         validations.add("language", as: String?.self, is: .nil || .count(2...10), required: false)

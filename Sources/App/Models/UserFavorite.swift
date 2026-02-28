@@ -8,6 +8,7 @@ final class UserFavorite: Model, Content, @unchecked Sendable {
     @Parent(key: "user_id") var user: User
     @Parent(key: "recipe_id") var recipe: Recipe
     @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 

@@ -1,6 +1,7 @@
 import Vapor
 import Fluent
 import JWT
+import struct Foundation.UUID
 
 struct AuthController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
@@ -107,7 +108,7 @@ struct AuthController: RouteCollection {
         guard let user = try await User.query(on: req.db)
             .filter(\.$firebaseUID == firebaseUser.uid)
             .first() else {
-            throw Abort(.notFound, reason: "User not registered. Please register first.")
+            throw Abort(.notFound, reason: "Authentication failed")
         }
 
         // Update last login date
@@ -136,7 +137,16 @@ struct AuthController: RouteCollection {
     // MARK: - POST /auth/logout
     @Sendable
     func logout(req: Request) async throws -> SuccessResponse {
-        SuccessResponse(message: "Logged out successfully")
+        // If a valid JWT is provided, blacklist it so it cannot be reused
+        if let bearerToken = req.headers.bearerAuthorization?.token {
+            if let payload = try? await req.jwt.verify(bearerToken, as: ServerJWTPayload.self) {
+                await TokenBlacklist.shared.blacklist(
+                    jti: payload.jti.value,
+                    expiration: payload.exp.value
+                )
+            }
+        }
+        return SuccessResponse(message: "Logged out successfully")
     }
 
     // MARK: - DELETE /auth/account
@@ -173,14 +183,16 @@ struct AuthController: RouteCollection {
             try await UserPreference.query(on: db).filter(\.$user.$id == userID).delete(force: true)
             try await UserProfile.query(on: db).filter(\.$user.$id == userID).delete(force: true)
 
-            // Delete recipe allergens for user-authored recipes
+            // Delete all recipe children and recipes for user-authored recipes
             let userRecipes = try await Recipe.query(on: db)
                 .filter(\.$author.$id == userID)
                 .all()
             for recipe in userRecipes {
-                try await RecipeAllergen.query(on: db)
-                    .filter(\.$recipe.$id == recipe.id!)
-                    .delete(force: true)
+                try await RecipeIngredient.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+                try await RecipeTagModel.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+                try await RecipeAllergen.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+                try await UserFavorite.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+                try await recipe.delete(force: true, on: db)
             }
 
             try await user.delete(force: true, on: db)
@@ -195,7 +207,8 @@ struct AuthController: RouteCollection {
         let payload = ServerJWTPayload(
             sub: .init(value: user.id!.uuidString),
             exp: .init(value: Date().addingTimeInterval(TimeInterval(APIConstants.jwtExpirationMinutes * 60))),
-            iat: .init(value: Date())
+            iat: .init(value: Date()),
+            jti: .init(value: UUID().uuidString)
         )
         return try await req.jwt.sign(payload)
     }

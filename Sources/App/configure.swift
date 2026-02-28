@@ -5,12 +5,12 @@ import JWT
 
 func configure(_ app: Application) async throws {
     // MARK: - Environment Safety (#19)
-    if app.environment == .production {
-        guard Environment.get("JWT_SECRET") != nil else {
-            fatalError("JWT_SECRET environment variable is required in production")
+    if app.environment != .development {
+        guard let secret = Environment.get("JWT_SECRET"), secret.count >= 32 else {
+            fatalError("JWT_SECRET environment variable is required (min 32 chars) in non-development environments")
         }
         guard Environment.get("DATABASE_URL") != nil || Environment.get("DB_PASSWORD") != nil else {
-            fatalError("DATABASE_URL or DB_PASSWORD environment variable is required in production")
+            fatalError("DATABASE_URL or DB_PASSWORD environment variable is required in non-development environments")
         }
     }
 
@@ -33,7 +33,7 @@ func configure(_ app: Application) async throws {
             username: username,
             password: password,
             database: database,
-            tls: .disable
+            tls: app.environment == .development ? .disable : .prefer(try .init(configuration: .clientDefault))
         )
         app.databases.use(.postgres(configuration: config), as: .psql)
     }
@@ -75,6 +75,18 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateHealthSyncLogs())
     app.migrations.add(CreatePushLogs())
     app.migrations.add(CreateNotificationSettings())
+
+    // Phase 2: Schema evolution migrations (frontend-backend alignment)
+    app.migrations.add(AddLastLoginToUsers())
+    app.migrations.add(AddDietaryPrefsToUserProfiles())
+    app.migrations.add(CreateUserPreferences())
+    app.migrations.add(AddMicronutrientsToDailySummary())
+    app.migrations.add(AddRecipeAuthorAndIconFields())
+    app.migrations.add(CreateRecipeAllergens())
+    app.migrations.add(RenameHealthActiveCalToActiveCalories())
+
+    // Phase 3: Soft delete support for all models
+    app.migrations.add(AddSoftDeleteToAllModels())
 
     // MARK: - Routes
     try routes(app)

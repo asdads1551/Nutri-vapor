@@ -8,6 +8,8 @@ final class RecipeAllergen: Model, Content, @unchecked Sendable {
     @Parent(key: "recipe_id") var recipe: Recipe
     @Field(key: "allergen") var allergen: String
 
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
+
     init() {}
 
     init(id: UUID? = nil, recipeID: UUID, allergen: String) {

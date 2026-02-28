@@ -92,6 +92,12 @@ struct CreateRecipeRequest: Content, Validatable {
         validations.add("steps", as: [String]?.self, is: .nil || .count(...100), required: false)
         validations.add("icon_name", as: String?.self, is: .nil || .count(1...100), required: false)
         validations.add("icon_background_color_hex", as: String?.self, is: .nil || .count(1...20), required: false)
+        validations.add("description", as: String?.self, is: .nil || .count(...5000), required: false)
+        validations.add("servings", as: Int?.self, is: .nil || .range(1...100), required: false)
+        validations.add("price", as: Int?.self, is: .nil || .range(0...1000000), required: false)
+        validations.add("image_url", as: String?.self, is: .nil || .count(1...2048), required: false)
+        validations.add("audio_url", as: String?.self, is: .nil || .count(1...2048), required: false)
+        validations.add("image_base64", as: String?.self, is: .nil || .count(...5000000), required: false)
     }
 }
 
