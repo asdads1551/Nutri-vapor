@@ -55,11 +55,17 @@ struct FirebaseAuthMiddleware: AsyncMiddleware {
             throw Abort(.unauthorized, reason: "Firebase token issued in the future")
         }
 
-        // Verify auth_time is in the past
-        if let authTime = payload["auth_time"] as? TimeInterval {
-            guard Date(timeIntervalSince1970: authTime) <= Date() else {
-                throw Abort(.unauthorized, reason: "Firebase token auth_time in the future")
-            }
+        // Verify auth_time is present and in the past
+        guard let authTime = payload["auth_time"] as? TimeInterval else {
+            throw Abort(.unauthorized, reason: "Firebase token missing auth_time")
+        }
+        guard Date(timeIntervalSince1970: authTime) <= Date() else {
+            throw Abort(.unauthorized, reason: "Firebase token auth_time in the future")
+        }
+
+        // Verify email_verified if present (optional — may not exist for Apple Sign In)
+        if let emailVerified = payload["email_verified"] as? Bool, emailVerified == false {
+            throw Abort(.unauthorized, reason: "Email not verified")
         }
 
         // Verify signature using Google JWKS
@@ -149,11 +155,17 @@ struct FirebaseAuthMiddleware: AsyncMiddleware {
             throw Abort(.unauthorized, reason: "Firebase token issued in the future")
         }
 
-        // Verify auth_time is in the past
-        if let authTime = payload["auth_time"] as? TimeInterval {
-            guard Date(timeIntervalSince1970: authTime) <= Date() else {
-                throw Abort(.unauthorized, reason: "Firebase token auth_time in the future")
-            }
+        // Verify auth_time is present and in the past
+        guard let authTime = payload["auth_time"] as? TimeInterval else {
+            throw Abort(.unauthorized, reason: "Firebase token missing auth_time")
+        }
+        guard Date(timeIntervalSince1970: authTime) <= Date() else {
+            throw Abort(.unauthorized, reason: "Firebase token auth_time in the future")
+        }
+
+        // Verify email_verified if present (optional — may not exist for Apple Sign In)
+        if let emailVerified = payload["email_verified"] as? Bool, emailVerified == false {
+            throw Abort(.unauthorized, reason: "Email not verified")
         }
 
         // Verify signature using Google JWKS
@@ -193,6 +205,10 @@ actor FirebaseJWKSManager {
 
     private var keyCollection: JWTKeyCollection?
     private var cacheExpiry: Date = .distantPast
+    /// Tracks when the cache was last successfully refreshed from Google
+    private var lastSuccessfulFetch: Date = .distantPast
+    /// Maximum allowed staleness for cached keys (24 hours)
+    private let maxStaleness: TimeInterval = 24 * 60 * 60
 
     func getKeys(client: Client, logger: Logger) async throws -> JWTKeyCollection {
         if let keys = keyCollection, Date() < cacheExpiry {
@@ -205,6 +221,12 @@ actor FirebaseJWKSManager {
         } catch {
             logger.error("Failed to fetch Google JWKS: \(error)")
             if let keys = keyCollection {
+                // Enforce maximum staleness of 24 hours
+                let staleDuration = Date().timeIntervalSince(lastSuccessfulFetch)
+                if staleDuration > maxStaleness {
+                    logger.error("JWKS cache exceeded maximum staleness of \(Int(maxStaleness))s (stale for \(Int(staleDuration))s)")
+                    throw Abort(.internalServerError, reason: "Unable to verify Firebase token: JWKS cache too stale")
+                }
                 logger.warning("Using expired Firebase JWKS cache as fallback")
                 return keys
             }
@@ -213,6 +235,12 @@ actor FirebaseJWKSManager {
 
         guard response.status == .ok, let body = response.body else {
             if let keys = keyCollection {
+                // Enforce maximum staleness of 24 hours
+                let staleDuration = Date().timeIntervalSince(lastSuccessfulFetch)
+                if staleDuration > maxStaleness {
+                    logger.error("JWKS cache exceeded maximum staleness of \(Int(maxStaleness))s (stale for \(Int(staleDuration))s)")
+                    throw Abort(.internalServerError, reason: "Unable to verify Firebase token: JWKS cache too stale")
+                }
                 logger.warning("Using expired Firebase JWKS cache as fallback (HTTP \(response.status))")
                 return keys
             }
@@ -224,6 +252,7 @@ actor FirebaseJWKSManager {
         try await newKeys.add(jwks: jwks)
 
         self.keyCollection = newKeys
+        self.lastSuccessfulFetch = Date()
 
         // Parse Cache-Control max-age, default to 1 hour
         var ttl: TimeInterval = 3600

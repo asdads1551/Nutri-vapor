@@ -10,6 +10,7 @@ final class UserPreference: Model, Content, @unchecked Sendable {
     @Field(key: "theme") var theme: String?
     @Field(key: "onboarding_completed") var onboardingCompleted: Bool
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 

@@ -13,6 +13,7 @@ final class HealthSyncLog: Model, Content, @unchecked Sendable {
     @Field(key: "heart_rate") var heartRate: Int?
     @Field(key: "sleep_hours") var sleepHours: Double?
     @Timestamp(key: "synced_at", on: .create) var syncedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 }

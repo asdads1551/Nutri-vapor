@@ -26,7 +26,7 @@ struct NotificationController: RouteCollection {
         }
     }
 
-    struct UpdateNotificationSettingsRequest: Content {
+    struct UpdateNotificationSettingsRequest: Content, Validatable {
         let mealRemind: Bool
         let waterRemind: Bool
         let nutritionAlert: Bool
@@ -39,6 +39,11 @@ struct NotificationController: RouteCollection {
             case nutritionAlert = "nutrition_alert"
             case quietHoursStart = "quiet_hours_start"
             case quietHoursEnd = "quiet_hours_end"
+        }
+
+        static func validations(_ validations: inout Validations) {
+            validations.add("quiet_hours_start", as: String?.self, is: .nil || .count(5...5), required: false)
+            validations.add("quiet_hours_end", as: String?.self, is: .nil || .count(5...5), required: false)
         }
     }
 
@@ -80,6 +85,7 @@ struct NotificationController: RouteCollection {
     @Sendable
     func updateSettings(req: Request) async throws -> NotificationSettingsResponse {
         let userID = try req.authenticatedUserID
+        try UpdateNotificationSettingsRequest.validate(content: req)
         let body = try req.content.decode(UpdateNotificationSettingsRequest.self)
 
         let settings: NotificationSetting

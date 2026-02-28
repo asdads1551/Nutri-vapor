@@ -8,6 +8,8 @@ final class RecipeTagModel: Model, Content, @unchecked Sendable {
     @Parent(key: "recipe_id") var recipe: Recipe
     @Field(key: "tag") var tag: RecipeTagDB
 
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
+
     init() {}
 
     init(id: UUID? = nil, recipeID: UUID, tag: RecipeTagDB) {

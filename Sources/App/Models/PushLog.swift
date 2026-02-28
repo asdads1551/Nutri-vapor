@@ -13,5 +13,7 @@ final class PushLog: Model, Content, @unchecked Sendable {
     @Field(key: "sent_at") var sentAt: Date
     @Field(key: "clicked_at") var clickedAt: Date?
 
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
+
     init() {}
 }

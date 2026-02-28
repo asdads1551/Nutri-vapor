@@ -314,7 +314,7 @@ struct NutritionController: RouteCollection {
         let metric = req.query[String.self, at: "metric"] ?? "calories"
         let range = req.query[String.self, at: "range"] ?? "30d"
 
-        let days = min(Int(range.replacingOccurrences(of: "d", with: "")) ?? 30, 365)
+        let days = max(1, min(Int(range.replacingOccurrences(of: "d", with: "")) ?? 30, 365))
         let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let startDate = calendar.date(byAdding: .day, value: -days, to: today)!

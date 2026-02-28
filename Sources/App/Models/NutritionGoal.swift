@@ -16,6 +16,7 @@ final class NutritionGoal: Model, Content, @unchecked Sendable {
     @Field(key: "water_ml") var waterMl: Int
     @Field(key: "effective_date") var effectiveDate: Date
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 

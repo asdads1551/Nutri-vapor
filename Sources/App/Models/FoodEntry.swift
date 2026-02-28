@@ -35,6 +35,7 @@ final class FoodEntry: Model, Content, @unchecked Sendable {
     @Field(key: "eaten_at") var eatenAt: Date
     @Timestamp(key: "created_at", on: .create) var createdAt: Date?
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 

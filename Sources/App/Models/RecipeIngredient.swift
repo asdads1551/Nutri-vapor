@@ -12,6 +12,8 @@ final class RecipeIngredient: Model, Content, @unchecked Sendable {
     @Field(key: "unit") var unit: String?
     @Field(key: "sort_order") var sortOrder: Int
 
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
+
     init() {}
 
     init(

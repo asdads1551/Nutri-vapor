@@ -132,6 +132,11 @@ struct RecipeController: RouteCollection {
             throw Abort(.notFound, reason: "Recipe not found")
         }
 
+        // Only allow viewing if published or if the user is the author
+        guard recipe.isPublished || recipe.$author.id == userID else {
+            throw Abort(.notFound, reason: "Recipe not found")
+        }
+
         let isFavorite = try await UserFavorite.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$recipe.$id == recipeID)
@@ -356,7 +361,13 @@ struct RecipeController: RouteCollection {
             throw Abort(.forbidden, reason: "You can only delete your own recipes")
         }
 
-        try await recipe.delete(force: true, on: req.db)
+        try await req.db.transaction { db in
+            try await RecipeIngredient.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+            try await RecipeTagModel.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+            try await RecipeAllergen.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+            try await UserFavorite.query(on: db).filter(\.$recipe.$id == recipe.id!).delete(force: true)
+            try await recipe.delete(force: true, on: db)
+        }
         return SuccessResponse(message: "Recipe deleted")
     }
 
@@ -369,6 +380,14 @@ struct RecipeController: RouteCollection {
 
         guard let recipeID = UUID(uuidString: body.recipeId) else {
             throw Abort(.badRequest, reason: "Invalid recipe_id format")
+        }
+
+        // Verify recipe exists and is published before allowing favorite
+        guard let _ = try await Recipe.query(on: req.db)
+            .filter(\.$id == recipeID)
+            .filter(\.$isPublished == true)
+            .first() else {
+            throw Abort(.notFound, reason: "Recipe not found")
         }
 
         let existing = try await UserFavorite.query(on: req.db)

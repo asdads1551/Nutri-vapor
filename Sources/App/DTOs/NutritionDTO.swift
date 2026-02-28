@@ -45,6 +45,12 @@ struct CreateFoodEntryRequest: Content, Validatable {
         validations.add("fiber", as: Double?.self, is: .nil || .range(0...500), required: false)
         validations.add("sugar", as: Double?.self, is: .nil || .range(0...2000), required: false)
         validations.add("sodium", as: Double?.self, is: .nil || .range(0...100000), required: false)
+        validations.add("potassium", as: Double?.self, is: .nil || .range(0...50000), required: false)
+        validations.add("calcium", as: Double?.self, is: .nil || .range(0...50000), required: false)
+        validations.add("iron", as: Double?.self, is: .nil || .range(0...5000), required: false)
+        validations.add("zinc", as: Double?.self, is: .nil || .range(0...5000), required: false)
+        validations.add("vitamin_c", as: Double?.self, is: .nil || .range(0...100000), required: false)
+        validations.add("vitamin_d", as: Double?.self, is: .nil || .range(0...50000), required: false)
         validations.add("image_url", as: String?.self, is: .nil || .count(1...2048), required: false)
     }
 }

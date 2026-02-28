@@ -25,6 +25,14 @@ struct NutritionService {
         let totalSugar = entries.reduce(0.0) { $0 + $1.sugarG }
         let totalSodium = entries.reduce(0.0) { $0 + $1.sodiumMg }
 
+        // Micronutrient totals
+        let totalPotassium = entries.reduce(0.0) { $0 + $1.potassiumMg }
+        let totalCalcium = entries.reduce(0.0) { $0 + $1.calciumMg }
+        let totalIron = entries.reduce(0.0) { $0 + $1.ironMg }
+        let totalZinc = entries.reduce(0.0) { $0 + $1.zincMg }
+        let totalVitaminC = entries.reduce(0.0) { $0 + $1.vitaminCMg }
+        let totalVitaminD = entries.reduce(0.0) { $0 + $1.vitaminDMcg }
+
         // Get user goals
         let goals = try await NutritionGoal.query(on: db)
             .filter(\.$user.$id == userID)
@@ -51,6 +59,12 @@ struct NutritionService {
             existing.totalFiber = totalFiber
             existing.totalSugar = totalSugar
             existing.totalSodium = totalSodium
+            existing.totalPotassium = totalPotassium
+            existing.totalCalcium = totalCalcium
+            existing.totalIron = totalIron
+            existing.totalZinc = totalZinc
+            existing.totalVitaminC = totalVitaminC
+            existing.totalVitaminD = totalVitaminD
             existing.entryCount = entries.count
             existing.goalMet = goalMet
             existing.score = score
@@ -66,6 +80,12 @@ struct NutritionService {
             summary.totalFiber = totalFiber
             summary.totalSugar = totalSugar
             summary.totalSodium = totalSodium
+            summary.totalPotassium = totalPotassium
+            summary.totalCalcium = totalCalcium
+            summary.totalIron = totalIron
+            summary.totalZinc = totalZinc
+            summary.totalVitaminC = totalVitaminC
+            summary.totalVitaminD = totalVitaminD
             summary.totalWaterMl = 0
             summary.entryCount = entries.count
             summary.goalMet = goalMet

@@ -6,6 +6,7 @@ actor RateLimitStore {
     private var requests: [String: [Date]] = [:]
     private let maxRequests: Int
     private let window: TimeInterval // seconds
+    private let maxKeys: Int = 10_000
 
     init(maxRequests: Int, windowSeconds: TimeInterval = 60) {
         self.maxRequests = maxRequests
@@ -16,9 +17,14 @@ actor RateLimitStore {
         let now = Date()
         let cutoff = now.addingTimeInterval(-window)
 
-        // Clean old entries
+        // Clean old entries for this key
         var reqs = requests[key, default: []]
         reqs = reqs.filter { $0 > cutoff }
+
+        // If timestamps array is empty after cleanup, remove the key entirely
+        if reqs.isEmpty && requests[key] != nil {
+            requests.removeValue(forKey: key)
+        }
 
         if reqs.count >= maxRequests {
             requests[key] = reqs
@@ -27,7 +33,29 @@ actor RateLimitStore {
 
         reqs.append(now)
         requests[key] = reqs
+
+        // Enforce maximum number of tracked keys to prevent unbounded memory growth
+        if requests.count > maxKeys {
+            evictOldestEntries()
+        }
+
         return true // allowed
+    }
+
+    /// Remove the oldest entries when the key limit is exceeded.
+    /// Removes keys with the oldest last-access timestamps.
+    private func evictOldestEntries() {
+        let targetSize = maxKeys / 2
+        // Sort keys by their most recent timestamp (oldest first)
+        let sorted = requests.sorted { lhs, rhs in
+            let lhsLatest = lhs.value.last ?? .distantPast
+            let rhsLatest = rhs.value.last ?? .distantPast
+            return lhsLatest < rhsLatest
+        }
+        let keysToRemove = sorted.prefix(requests.count - targetSize)
+        for (key, _) in keysToRemove {
+            requests.removeValue(forKey: key)
+        }
     }
 }
 
@@ -44,7 +72,14 @@ struct RateLimitMiddleware: AsyncMiddleware {
         if let userID = request.storage[AuthenticatedUserKey.self] {
             key = "user:\(userID)"
         } else {
-            key = "ip:\(request.remoteAddress?.description ?? "unknown")"
+            // Check X-Forwarded-For header first (take the first IP in the chain),
+            // then fall back to remoteAddress
+            if let forwarded = request.headers.first(name: "X-Forwarded-For") {
+                let firstIP = forwarded.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? "unknown"
+                key = "ip:\(firstIP)"
+            } else {
+                key = "ip:\(request.remoteAddress?.description ?? "unknown")"
+            }
         }
 
         let allowed = await store.checkLimit(for: key)

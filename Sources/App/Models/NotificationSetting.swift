@@ -13,6 +13,7 @@ final class NotificationSetting: Model, Content, @unchecked Sendable {
     @Field(key: "quiet_hours_start") var quietHoursStart: String?
     @Field(key: "quiet_hours_end") var quietHoursEnd: String?
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
+    @Timestamp(key: "deleted_at", on: .delete) var deletedAt: Date?
 
     init() {}
 
