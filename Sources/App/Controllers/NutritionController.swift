@@ -128,8 +128,12 @@ struct NutritionController: RouteCollection {
             query = query.filter(\.$mealType == mealType)
         }
 
+        // Support limit query param (frontend sends limit=100)
+        let limit = min(req.query[Int.self, at: "limit"] ?? 200, 500)
+
         let entries = try await query
             .sort(\.$eatenAt, .ascending)
+            .limit(limit)
             .all()
 
         return entries.map { buildEntryResponse($0) }
@@ -226,8 +230,9 @@ struct NutritionController: RouteCollection {
     }
 
     // MARK: - GET /nutrition/summary/weekly
+    // Frontend expects a SINGLE aggregated DailySummaryResponse, not an array
     @Sendable
-    func weeklySummary(req: Request) async throws -> [DailySummaryResponse] {
+    func weeklySummary(req: Request) async throws -> DailySummaryResponse {
         let userID = try req.authenticatedUserID
         let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
@@ -239,72 +244,25 @@ struct NutritionController: RouteCollection {
             .filter(\.$eatenAt < calendar.date(byAdding: .day, value: 1, to: today)!)
             .all()
 
-        var dailyMap: [String: [FoodEntry]] = [:]
-        for entry in entries {
-            let key = DateFormatter.yyyyMMdd.string(from: entry.eatenAt)
-            dailyMap[key, default: []].append(entry)
-        }
-
-        return (0..<7).map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: today)!
-            let key = DateFormatter.yyyyMMdd.string(from: date)
-            let dayEntries = dailyMap[key] ?? []
-            return buildDailySummary(date: key, entries: dayEntries)
-        }.reversed()
+        return buildDailySummary(date: DateFormatter.yyyyMMdd.string(from: weekAgo), entries: entries)
     }
 
     // MARK: - GET /nutrition/summary/monthly
+    // Frontend expects a SINGLE aggregated DailySummaryResponse, not an array
     @Sendable
-    func monthlySummary(req: Request) async throws -> [DailySummaryResponse] {
+    func monthlySummary(req: Request) async throws -> DailySummaryResponse {
         let userID = try req.authenticatedUserID
         let calendar = Calendar.taipei
         let today = calendar.startOfDay(for: Date())
         let monthAgo = calendar.date(byAdding: .day, value: -30, to: today)!
 
-        // Use pre-aggregated DailyNutritionSummary when available
-        let summaries = try await DailyNutritionSummary.query(on: req.db)
-            .filter(\.$user.$id == userID)
-            .filter(\.$date >= monthAgo)
-            .sort(\.$date, .ascending)
-            .all()
-
-        if !summaries.isEmpty {
-            return summaries.map { s in
-                DailySummaryResponse(
-                    date: DateFormatter.yyyyMMdd.string(from: s.date),
-                    totalCalories: s.totalCalories,
-                    totalCarbs: s.totalCarbs,
-                    totalProtein: s.totalProtein,
-                    totalFat: s.totalFat,
-                    totalFiber: s.totalFiber,
-                    totalSugar: s.totalSugar,
-                    totalSodium: s.totalSodium,
-                    totalPotassium: s.totalPotassium,
-                    totalCalcium: s.totalCalcium,
-                    totalIron: s.totalIron,
-                    totalZinc: s.totalZinc,
-                    totalVitaminC: s.totalVitaminC,
-                    totalVitaminD: s.totalVitaminD,
-                    entryCount: s.entryCount
-                )
-            }
-        }
-
-        // Fallback: aggregate from FoodEntry
+        // Aggregate from FoodEntry
         let entries = try await FoodEntry.query(on: req.db)
             .filter(\.$user.$id == userID)
             .filter(\.$eatenAt >= monthAgo)
             .all()
 
-        var dailyMap: [String: [FoodEntry]] = [:]
-        for entry in entries {
-            let key = DateFormatter.yyyyMMdd.string(from: entry.eatenAt)
-            dailyMap[key, default: []].append(entry)
-        }
-
-        return dailyMap.map { (key, dayEntries) in
-            buildDailySummary(date: key, entries: dayEntries)
-        }.sorted { ($0.date ?? "") < ($1.date ?? "") }
+        return buildDailySummary(date: DateFormatter.yyyyMMdd.string(from: monthAgo), entries: entries)
     }
 
     // MARK: - GET /nutrition/trends

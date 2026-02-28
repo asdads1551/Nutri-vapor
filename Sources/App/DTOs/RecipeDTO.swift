@@ -6,8 +6,8 @@ struct RecipeResponse: Content {
     let id: String
     let name: String
     let description: String?
-    let iconName: String?
-    let iconBackgroundColorHex: String?
+    let iconName: String
+    let iconBackgroundColorHex: String
     let calories: Int
     let protein: Double
     let carbs: Double
@@ -19,7 +19,7 @@ struct RecipeResponse: Content {
     let price: Int
     let tags: [String]
     let allergens: [String]
-    let ingredients: [IngredientResponse]?
+    let ingredients: [IngredientResponse]
     let steps: [String]?
     let cuisineType: String?
     let imageUrl: String?
