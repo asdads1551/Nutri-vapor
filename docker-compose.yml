@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: nutri
       POSTGRES_PASSWORD: nutri_dev
@@ -27,6 +27,28 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: "postgres://nutri:nutri_dev@db:5432/nutri_db"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["migrate", "--yes"]
+    deploy:
+      replicas: 0
+
+  revert:
+    build: .
+    environment:
+      DATABASE_URL: "postgres://nutri:nutri_dev@db:5432/nutri_db"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["migrate", "--revert", "--yes"]
+    deploy:
+      replicas: 0
 
 volumes:
   pgdata:
